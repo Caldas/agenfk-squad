@@ -1,0 +1,24 @@
+agenfk-squad
+Copyright (c) 2026 Eduardo José Pin
+Licensed under the ISC License (see LICENSE).
+
+This repository redistributes third-party skills, unmodified, under
+skills/vendor/. They are NOT covered by the ISC license above:
+
+  skills/vendor/algorithmic-art   Copyright Anthropic, PBC. Apache License 2.0.
+  skills/vendor/canvas-design     Copyright Anthropic, PBC. Apache License 2.0.
+                                  Bundled fonts carry their own licenses
+                                  (SIL Open Font License); the *-OFL.txt files
+                                  sit in canvas-fonts/, one per font family
+                                  or per foundry family group.
+
+The full license text ships inside each directory (LICENSE.txt).
+
+agenfk-squad is built on AgenFK (https://github.com/cglab-public/agenfk),
+Copyright (c) 2026 CG/lab, ISC License. AgenFK is a separate project and is
+not redistributed here.
+
+The design-reference skill distils publicly available guidance from
+frontend-design (Anthropic), Impeccable, Emil Kowalski, the Vercel Web
+Interface Guidelines, UI/UX Pro Max and Stitch DESIGN.md. It quotes none of
+them at length; each is credited where it is used.
