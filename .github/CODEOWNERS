@@ -1,0 +1,13 @@
+# Review ownership for the independent AgenFK Squad project.
+# CODEOWNERS requests reviews; enforcement must be configured in GitHub rulesets.
+* @eduardopin
+
+# Execution, installation and automation-sensitive paths.
+/hooks/ @eduardopin
+/install.sh @eduardopin
+/.github/ @eduardopin
+
+# Agent and skill behavior.
+/agents/ @eduardopin
+/skills/ @eduardopin
+/flows/ @eduardopin
