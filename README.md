@@ -224,19 +224,83 @@ drive Claude Code. [ROADMAP.md](ROADMAP.md) lists what that leaves open.
 
 ## Contributing
 
-The concept is young and the sample is one machine. The most valuable
-contribution is not code: it is **a failure you observed, with numbers**, and
-the rule that would have prevented it.
+**Community contributions are welcome.** You do not need write access or an
+invitation to contribute: fork this public repository, make changes on your own
+branch, and open a pull request (PR). Maintainers review and merge changes into
+`main`.
 
-- Ran the watcher and it cut a session too early, or too late? Open an issue
-  with what `session_context.py --detail` showed.
-- Have an agent role that earned its place in two projects? Propose it.
-- Use another harness (Codex, pi, Gemini CLI, OpenCode)? The hooks are the
-  part that does not travel yet.
+We value evidence over speculative rules. Especially useful contributions are:
 
-Start with [CONTRIBUTING.md](CONTRIBUTING.md). The house rule: a new role
-enters only after it has shown up in two projects, and every hook change comes
-with a test that fails without it.
+- A watcher failure you observed, with context metrics and the
+  `[squad-watch]` output (remove sensitive data before posting).
+- Measured improvements to thresholds, handoffs, parallel work or merge safety.
+- Support for other agent harnesses (Codex, pi, Gemini CLI, OpenCode).
+- Reproducible tests, fixes, documentation and examples.
+
+See [the roadmap](ROADMAP.md) or [open issues](https://github.com/eduardopin/agenfk-squad/issues)
+to find work. For non-trivial changes, open a
+[proposal](https://github.com/eduardopin/agenfk-squad/issues/new/choose) first
+so the approach can be discussed before implementation.
+
+### Contribute in six steps
+
+1. **Fork** this repository using GitHub's **Fork** button.
+2. **Clone your fork**, add this repository as `upstream`, and create a
+   descriptive branch:
+
+   ```bash
+   git clone https://github.com/YOUR_USERNAME/agenfk-squad.git
+   cd agenfk-squad
+   git remote add upstream https://github.com/eduardopin/agenfk-squad.git
+   git switch -c fix/describe-the-change
+   ```
+
+3. **Make one focused change**, following
+   [CONTRIBUTING.md](CONTRIBUTING.md). A hook change must include a regression
+   test that fails without the fix. Do not include private transcripts, session
+   IDs, customer names, credentials or machine-specific paths.
+4. **Run the checks** before submitting:
+
+   ```bash
+   python3 tests/test_watch.py
+   python3 -m py_compile hooks/*.py skills/session-context/scripts/session_context.py
+   bash -n install.sh
+   ```
+
+   You do **not** need to run `install.sh` to develop or test this repository.
+   It changes your local Claude Code setup; use the isolated test procedure
+   in [CONTRIBUTING.md](CONTRIBUTING.md) if you want to test installation.
+
+5. **Push your branch** to your fork and open a PR against
+   `eduardopin/agenfk-squad:main`:
+
+   ```bash
+   git add .
+   git commit -m "Fix: describe the behavior corrected"
+   git push -u origin fix/describe-the-change
+   ```
+
+   Use the [Pull Requests page](https://github.com/eduardopin/agenfk-squad/compare)
+   or the link GitHub shows after pushing. Complete the
+   [PR template](.github/PULL_REQUEST_TEMPLATE.md), explaining the failure,
+   the change and the test evidence.
+
+6. **Respond to review and CI results.** GitHub Actions checks incoming PRs
+   on Python 3.10, 3.12 and 3.14. Maintainers review the change; an approved,
+   passing contribution can be merged by a maintainer. You never need direct
+   write access to `main`.
+
+**Project standards:** keep PRs small; provide evidence for behavioral changes;
+prefer Python's standard library for hooks and scripts; document changes to
+watcher messages, thresholds and environment variables. New agent roles need
+evidence from two projects. The full requirements are in
+[CONTRIBUTING.md](CONTRIBUTING.md).
+
+**Safety and community:** follow the
+[Code of Conduct](CODE_OF_CONDUCT.md). Report vulnerabilities privately using
+[GitHub's vulnerability reporting](https://github.com/eduardopin/agenfk-squad/security/advisories/new),
+not public issues. By contributing, you agree to license your contribution
+under the project's [ISC license](LICENSE).
 
 ## License and credits
 
