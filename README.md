@@ -193,6 +193,7 @@ Then open a project that has an AgenFK board and ask for something:
 | [docs/agenfk-integration.md](docs/agenfk-integration.md) | Flow step → agent → AgenFK command → evidence; how to activate the flow |
 | [docs/configuration.md](docs/configuration.md) | Every `SQUAD_*` variable and its default |
 | [docs/installation.md](docs/installation.md) | Requirements, what the installer links, the `settings.json` hooks, uninstalling |
+| [docs/external-contributor-agent.md](docs/external-contributor-agent.md) | Copy-paste onboarding protocol for external Claude Code and other coding agents |
 | [ROADMAP.md](ROADMAP.md) | What is missing, and where help is most useful |
 
 ## Skills
@@ -223,6 +224,11 @@ The session report reads Codex and pi transcripts too, but the hooks only
 drive Claude Code. [ROADMAP.md](ROADMAP.md) lists what that leaves open.
 
 ## Contributing
+
+**Using Claude Code or another coding agent from outside this organization?**
+Use the [external contributor agent protocol](docs/external-contributor-agent.md)
+as a copy-paste onboarding guide. It covers safe isolation, GitHub fork/PR setup,
+validation, and approval before publishing company material.
 
 **Community contributions are welcome.** You do not need write access or an
 invitation to contribute: fork this public repository, make changes on your own
