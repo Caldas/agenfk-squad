@@ -7,6 +7,7 @@ touches ~/.claude.
 
     python3 tests/test_seal.py
 """
+import importlib.util
 import json
 import os
 import stat
@@ -166,9 +167,50 @@ def test_record_refuses_evidence_that_is_not_the_report_of_head():
     for bad in (other, os.path.join(h, "0" * 40 + ".md"), os.path.join(h, "missing", os.path.basename(ev))):
         r = record(h, repo, bad)
         assert r.returncode == 1 and "report of this very commit" in r.stderr, (bad, r.stderr)
+    eleven = os.path.join(h, os.path.basename(ev)[:11] + ".md")
+    os.rename(ev, eleven)
+    r = record(h, repo, eleven)
+    assert r.returncode == 1 and "at least 12 characters" in r.stderr, r.stderr   # 11 is too short
     short = os.path.join(h, os.path.basename(ev)[:12] + ".md")
-    os.rename(ev, short)
+    os.rename(eleven, short)
     assert record(h, repo, short).returncode == 0                      # a 12-character prefix is enough
+
+
+def test_a_seal_file_whose_verdict_is_not_ship_does_not_count():
+    """The watcher reads the verdict, not only the SHA: a seal file edited, or
+    written by something else, with another verdict is no seal."""
+    h, repo, ev, _, gh = setup()
+    git(repo, "config", "squad.seal", "true")
+    assert record(h, repo, ev).returncode == 0 and merge(h, repo, gh) == "nothing"
+    folder = os.path.join(h, ".claude", "squad", "seals")
+    (sub,) = os.listdir(folder)
+    (name,) = os.listdir(os.path.join(folder, sub))
+    path = os.path.join(folder, sub, name)
+    with open(path) as fh:
+        d = json.load(fh)
+    for verdict in ("FIX_FIRST", "REJECT", "ship", None):
+        with open(path, "w") as fh:
+            json.dump({**d, "verdict": verdict}, fh)
+        out = merge(h, repo, gh)
+        assert "MERGE SEAL" in out and "no seal for that SHA" in out, (verdict, out)
+        out = merge(h, repo, gh, "git push origin HEAD:main")
+        assert "MERGE SEAL" in out, (verdict, out)
+
+
+def test_seal_is_on_when_git_cannot_answer_the_setting():
+    """Fail closed: when `git config squad.seal` cannot run (git missing or timed
+    out), the seal counts as on; a plain "not set" leaves it off."""
+    spec = importlib.util.spec_from_file_location("squad_watch", WATCH)
+    watch = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(watch)
+    saved = os.environ.pop("SQUAD_SEAL", None)
+    try:
+        for answer, on in (((-1, ""), True), ((1, ""), False), ((0, "true"), True), ((0, "false"), False)):
+            watch.git_rc = lambda *a, answer=answer, **k: answer
+            assert watch.seal_on("/nowhere") is on, (answer, on)
+    finally:
+        if saved is not None:
+            os.environ["SQUAD_SEAL"] = saved
 
 
 def fake_gh(h, body, code=0):
