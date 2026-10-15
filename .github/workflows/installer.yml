@@ -5,7 +5,7 @@ name: installer
 # accepts. Runs only when the installer or what it drives changes.
 on:
   push:
-    branches: [main]
+    branches: [main, beta]
     paths:
       - get.sh
       - install.sh
