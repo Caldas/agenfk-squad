@@ -5,7 +5,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/eduardopin/agenfk-squad/main/get.sh | sh -s -- --beta
 #
 # Options (the same as environment variables; an option wins over a variable):
-#   --stable           the latest v* tag on main, or main while there is no tag (default)
+#   --stable           the latest vX.Y.Z tag on main, or main while there is none (default)
 #   --beta             the beta branch                       SQUAD_CHANNEL=stable|beta
 #   --ref <name>       a tag, branch or commit               SQUAD_REF=<name>
 #   --uninstall        remove the squad's hook entries from settings.json and the
@@ -38,7 +38,7 @@ Installs agenfk-squad for Claude Code: $GET_URL
   sh get.sh [--stable | --beta | --ref <tag|branch|commit>]
   sh get.sh --uninstall [--purge]
 
-  --stable     the latest v* tag on main, or main while there is no tag (default)
+  --stable     the latest vX.Y.Z tag on main, or main while there is none (default)
   --beta       the beta branch
   --ref NAME   a tag, branch or commit
   --uninstall  remove the squad's hooks from settings.json and the links into the clone
@@ -150,6 +150,13 @@ if [ "$ACTION" = install ]; then
 fi
 
 # ---------------------------------------------------------------- uninstall
+# SQUAD_HOME is trusted with deletes and checkouts only once it looks like the
+# squad: SQUAD_HOME=$HOME, or a dotfiles repository, must never qualify.
+is_clone() { [ -e "$1/.git" ] && [ -f "$1/install.sh" ] && [ -f "$1/hooks/squad-watch.py" ]; }
+not_a_clone() {
+  die "$DIR does not look like an agenfk-squad clone (no .git, install.sh and hooks/squad-watch.py), so nothing was changed. Point SQUAD_HOME at the clone"
+}
+
 remove_links() {
   dir_p=$DIR
   [ -d "$DIR" ] && dir_p=$(cd "$DIR" && pwd -P)
@@ -164,9 +171,8 @@ remove_links() {
   done
 }
 
-is_clone() { [ -e "$1/.git" ] && [ -f "$1/install.sh" ] && [ -f "$1/hooks/squad-watch.py" ]; }
-
 if [ "$ACTION" = uninstall ]; then
+  if [ -d "$DIR" ] && ! is_clone "$DIR"; then not_a_clone; fi
   if [ -f "$DIR/scripts/squad_settings.py" ] && [ -f "$DIR/hooks/manifest.json" ]; then
     python3 "$DIR/scripts/squad_settings.py" uninstall --config "$CLAUDE" --manifest "$DIR/hooks/manifest.json" \
       || die "settings.json was left as it was (see above); nothing else was removed"
@@ -175,7 +181,7 @@ if [ "$ACTION" = uninstall ]; then
   fi
   remove_links
   if [ "$PURGE" = 1 ] && [ -d "$DIR" ]; then
-    is_clone "$DIR" || die "$DIR does not look like an agenfk-squad clone: not deleting it"
+    is_clone "$DIR" || not_a_clone
     if [ -n "$(git -C "$DIR" status --porcelain)" ]; then
       die "$DIR has local changes: not deleting it. Save what you need, then delete it by hand"
     fi
@@ -196,6 +202,7 @@ if [ -e "$DIR" ] && [ ! -d "$DIR" ]; then
   die "$DIR exists and is not a directory. Move it, or set SQUAD_HOME to another place"
 fi
 if [ -e "$DIR/.git" ]; then
+  is_clone "$DIR" || not_a_clone
   changes=$(git -C "$DIR" status --porcelain) || die "$DIR is not a usable git clone"
   if [ -n "$changes" ]; then
     printf '%s\n' "$changes" >&2
@@ -224,7 +231,9 @@ elif [ "$CHANNEL" = beta ]; then
   label="beta"
 else
   commit_of refs/remotes/origin/main >/dev/null || die "the repository has no main branch"
-  tag=$(git -C "$DIR" tag --list 'v*' --merged refs/remotes/origin/main --sort=-v:refname | sed -n 1p)
+  # releases only: vX.Y.Z, so a pre-release such as v1.0.0-rc2 is not "stable"
+  tag=$(git -C "$DIR" tag --list 'v*' --merged refs/remotes/origin/main --sort=-v:refname \
+    | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sed -n 1p)
   if [ -n "$tag" ]; then
     commit=$(commit_of "refs/tags/$tag")
     label="stable ($tag)"
