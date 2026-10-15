@@ -153,7 +153,7 @@ makes the agent rigid everywhere else. Explain the reason for the rule instead.
 
 ## Pull requests
 
-- Base branch: `beta`. A pull request against `main` will be retargeted.
+- Base branch: `beta`. A pull request against `main` will be asked to change its base to `beta`.
 - One change per pull request. Small ones are reviewed quickly.
 - Fill in the template. The checklist is the review.
 - Commit messages in the imperative, with the reason in the body when it is

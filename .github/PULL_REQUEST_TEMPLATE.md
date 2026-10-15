@@ -1,4 +1,4 @@
-<!-- Base branch: beta. Pull requests against main are retargeted; main only takes releases (see docs/releasing.md). -->
+<!-- Base branch: beta. A pull request against main will be asked to change its base; main only takes releases (see docs/releasing.md). -->
 
 ## What changes
 

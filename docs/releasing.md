@@ -91,10 +91,15 @@ is already in `beta`.
 
 ### 4. Tag the merge commit
 
+Tag the merge commit of the release pull request itself, not the tip of
+`main`: if anything else lands on `main` in between, the tip is the wrong
+commit.
+
 ```bash
 git fetch origin
-git log -1 --oneline origin/main
-git tag -a v0.1.0 -m "v0.1.0" origin/main
+sha=$(gh pr view <n> --json mergeCommit --jq .mergeCommit.oid)
+git log -1 --oneline "$sha"
+git tag -a v0.1.0 -m "v0.1.0" "$sha"
 git push origin v0.1.0
 ```
 
