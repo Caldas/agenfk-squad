@@ -453,34 +453,24 @@ def queue(h):
 
 
 def test_merge_queue_one_session_at_a_time_and_the_next_is_called():
+    """Contract since the short turn: one session merges at a time, but only for
+    the merge call itself; the next one goes as soon as that call returns, with
+    no queue, no MERGE TURN call and no sync denial."""
     h = home()
     repo, env, state_file = repo_with_gh(h)
     a, b = "aaaa1111-0001", "bbbb2222-0001"
     assert bash(h, "PreToolUse", a, repo, "gh pr merge 10 --squash", env) == "nothing"   # turn free: passes
     assert queue(h)[0]["holder"]["session"] == a
     out = bash(h, "PreToolUse", b, repo, "cd x && gh pr merge 11 --squash", env)
-    assert "MERGE QUEUE" in out and "position 1" in out and "PR #10" in out, out
-    assert "position 1" in bash(h, "PreToolUse", b, repo, "gh pr merge 11 --squash", env)  # no duplicate
-    assert len(queue(h)[0]["queue"]) == 1
-    # syncing with main while another session holds the turn: warned once, then it passes
-    out = bash(h, "PreToolUse", b, repo, "git fetch origin && git merge origin/main", env)
-    assert "main is about to move" in out and "repeat the command" in out, out
+    assert "MERGE QUEUE" in out and "is merging" in out and "PR #10" in out, out
+    assert "queue" not in queue(h)[0] and queue(h)[0]["intents"] == []                    # nobody waits in line
     assert bash(h, "PreToolUse", b, repo, "git fetch origin && git merge origin/main", env) == "nothing"
-    assert bash(h, "PreToolUse", a, repo, "git merge origin/main", env) == "nothing"     # the turn holder syncs
-    # A's merge has not landed yet: the turn is still A's, and A is told what to do
-    out = bash(h, "PostToolUse", a, repo, "gh pr merge 10 --squash", env)
-    assert "the turn in this repository is yours" in out and "ONCE" in out, out
-    with open(state_file, "w") as fh:
-        fh.write("MERGED")
-    out = bash(h, "PostToolUse", a, repo, "gh pr merge 10 --squash", env)
-    assert "PR #10 landed on main" in out and "bbbb2222" in out, out
+    assert bash(h, "PreToolUse", a, repo, "git merge origin/main", env) == "nothing"
+    assert bash(h, "PostToolUse", a, repo, "gh pr merge 10 --squash", env) == "nothing"   # the call returned
     d, _ = queue(h)
-    assert d["holder"]["session"] == b and d["queue"] == []
-    with open(state_file, "w") as fh:
-        fh.write("OPEN")
-    out = bash(h, "PostToolUse", b, repo, "ls", env)                  # B is called in its own session
-    assert "MERGE TURN: it is your turn" in out and "PR #11" in out, out
-    assert bash(h, "PreToolUse", b, repo, "gh pr merge 11 --squash", env) == "nothing"
+    assert d["holder"] is None and d["last"]["session"] == a and d["last"]["why"] == "done"
+    assert bash(h, "PreToolUse", b, repo, "gh pr merge 11 --squash", env) == "nothing"    # the next one goes
+    assert queue(h)[0]["holder"]["session"] == b
     assert "MERGE QUEUE" in bash(h, "PreToolUse", a, repo, "gh pr merge 12", env)
 
 
@@ -489,32 +479,31 @@ def test_merge_queue_stalled_turn_passes_on_and_can_be_requested_and_released():
     repo, env, _ = repo_with_gh(h)
     a, b, c = "aaaa1111-0002", "bbbb2222-0002", "cccc3333-0002"
     assert bash(h, "PreToolUse", a, repo, "squad-turn request 20", env) == "nothing"
-    assert queue(h)[0]["holder"]["pr"] == "20"
-    assert bash(h, "PreToolUse", b, repo, "squad-turn request 21", env) == "nothing"   # requesting only queues
-    assert bash(h, "PreToolUse", c, repo, "git push origin HEAD:main", env) != "nothing"
-    d, path = queue(h)
-    assert [e["session"] for e in d["queue"]] == [b, c]
-    d["holder"]["seen"] -= 1000                       # A vanished holding the turn
-    with open(path, "w") as fh:
-        json.dump(d, fh)
-    bash(h, "PreToolUse", c, repo, "squad-turn status", env)
-    d, path = queue(h)
-    assert d["holder"]["session"] == b and d["last"]["why"] == "idle"
-    assert "was released" in bash(h, "PostToolUse", a, repo, "ls", env)          # A finds out
-    d["holder"]["since"] -= 400                       # B was called and did not show up within 5 min
-    d["holder"]["seen"] = d["holder"]["since"]
-    with open(path, "w") as fh:
-        json.dump(d, fh)
-    assert bash(h, "PreToolUse", c, repo, "gh pr merge", env) == "nothing"        # the turn reaches C
+    assert bash(h, "PreToolUse", b, repo, "squad-turn request 21", env) == "nothing"
     d, _ = queue(h)
-    assert d["holder"]["session"] == c and d["holder"]["pr"] == "77"             # the branch's PR, through gh
-    bash(h, "PreToolUse", c, repo, "squad-turn release", env)
+    assert d.get("holder") is None and [(e["session"], e["pr"]) for e in d["intents"]] == [(a, "20"), (b, "21")]
+    assert bash(h, "PreToolUse", c, repo, "git push origin HEAD:main", env) == "nothing"   # an intent blocks nobody
+    d, path = queue(h)
+    d["holder"]["since"] -= 1000                      # C's merge call never came back
+    with open(path, "w") as fh:
+        json.dump(d, fh)
+    assert bash(h, "PreToolUse", a, repo, "gh pr merge", env) == "nothing"        # the stalled turn passes on
+    d, _ = queue(h)
+    assert d["holder"]["session"] == a and d["holder"]["pr"] == "77" and d["last"]["why"] == "expired"
+    assert [e["session"] for e in d["intents"]] == [b]                            # merging consumed A's intent
+    assert "expired" in bash(h, "PostToolUse", c, repo, "ls", env)               # C finds out
+    bash(h, "PreToolUse", a, repo, "squad-turn release", env)
     assert queue(h)[0]["holder"] is None
-    # text that only mentions the command does not join the queue; neither does a branch with "main" in its name
-    for cmd in ("python3 - <<'E'\npat = 'gh pr merge|git merge origin/main'\nE", "git push origin feat/main-menu",
-                "git commit -m 'explain gh pr merge'", "echo squad-turn request"):
+    bash(h, "PreToolUse", b, repo, "squad-turn release", env)
+    assert queue(h)[0]["intents"] == []
+    # text that is provably data does not take the turn; neither does a branch with "main" in its name
+    for cmd in ("git push origin feat/main-menu", "git commit -m 'explain gh pr merge'", "echo squad-turn request"):
         assert bash(h, "PreToolUse", a, repo, cmd, env) == "nothing", cmd
     assert queue(h)[0]["holder"] is None
+    # fail closed (contract change): code fed to an interpreter counts as a merge, even through a heredoc
+    bash(h, "PreToolUse", a, repo, "python3 - <<'E'\npat = 'gh pr merge|git merge origin/main'\nE", env)
+    assert queue(h)[0]["holder"]["session"] == a
+    bash(h, "PreToolUse", a, repo, "squad-turn release", env)
     assert bash(h, "PreToolUse", a, repo, "gh pr merge 30", {"SQUAD_TURN": "0", **env}) == "nothing"
     assert queue(h)[0]["holder"] is None
 
@@ -527,32 +516,163 @@ def holder(h):
     return queue(h)[0].get("holder")
 
 
-def test_merge_text_inside_quotes_heredoc_or_comment_does_not_take_the_turn():
+GM = "gh pr " + "merge"
+
+
+def test_merge_text_is_data_only_where_it_provably_does_not_run():
     """October 2026: `agenfk create ... -d "... (gh pr merge, ...)"` took the merge
-    turn. The parenthesis and the newline inside the quoted description looked
-    like a command position; only what the shell runs as a command counts."""
+    turn. Text is data only as the value of -m/-d/--body/--title/--description/
+    --evidence or an echo/printf argument, on a line of inert commands; any other
+    form counts as a merge (fail closed) and goes through the turn and the seal."""
     h = home()
     repo, env, _ = repo_with_gh(h)
     sid = "dddd4444-0001"
-    for cmd in ('agenfk create story x -d "The turn covers the merge (gh pr merge, push to main, '
-                'merge_pull_request)"',
-                'agenfk comment 1 "step 1; gh pr merge 3 after the review"',
-                "agenfk comment 1 'first line\ngh pr merge 5'",
-                'agenfk comment 1 "push it: \\"git push origin HEAD:main\\" | done"',
-                "cat > notes.md <<EOF\nthen\ngh pr merge 9\ngit push origin main\nEOF",
-                "cat > notes.md <<-'X'\n\tgh pr merge 9\n\tX",
-                "ls  # ; gh pr merge 4",
-                "echo \\; gh pr merge 6"):
+    for cmd in (f'agenfk create story x -d "The turn covers the merge ({GM}, push to main, merge_pull_request)"',
+                f"git commit -m 'explain {GM}'", f'gh pr create --title "x" --body "run {GM} 5 after"',
+                f"echo \\; {GM} 6", f'cd x && agenfk create --description="{GM} 5" 2>&1'):
         assert bash(h, "PreToolUse", sid, repo, cmd, env) == "nothing", cmd
         assert holder(h) is None, cmd
-    # the real command after quoted text still takes it, with its own PR number
-    bash(h, "PreToolUse", sid, repo, 'agenfk comment 1 "ready, see gh pr merge 3" && gh pr merge 12 --squash', env)
-    assert holder(h)["session"] == sid and holder(h)["pr"] == "12", holder(h)
-    # and so does a command after a heredoc ends
+    for cmd in (f'bash -c "{GM} 5"', f"sh -c '{GM} 5'", 'eval "git push origin main"', f'ssh host "{GM} 5"',
+                f"echo 5 | xargs {GM}", f'env FOO=1 sh -c "{GM} 5"', f'echo "$({GM} 5)"', f"echo `{GM} 5`",
+                f"watch -n 5 {GM} 5", f"timeout 60 {GM} 5", f"nohup {GM} 5", "git -C . push origin HEAD:main",
+                "git push origin +HEAD:refs/heads/main", "gh api -X PUT repos/o/r/pulls/5/merge",
+                f'echo "{GM} 5" | sh', 'gh pr "mer""ge" 5', f"cat > n.md <<EOF\n{GM} 9\nEOF"):
+        assert bash(h, "PreToolUse", sid, repo, cmd, env) == "nothing", cmd     # seal off: takes the turn
+        assert holder(h)["session"] == sid, cmd
+        bash(h, "PostToolUse", sid, repo, cmd, env)                            # and gives it back
+        assert holder(h) is None, cmd
+        out = bash(h, "PreToolUse", sid, repo, cmd, {**env, "SQUAD_SEAL": "1"})
+        assert "MERGE SEAL" in out and "squad-seal record" in out, (cmd, out)
+        assert holder(h) is None, cmd                                          # a denial releases at once
+    out = bash(h, "PreToolUse", sid, repo, f'agenfk comment 1 "see {GM} 3" && {GM} 12', env)
+    assert "more than one merge" in out and "#3" in out and "#12" in out, out
+
+
+def git(repo, *args):
+    return subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True, check=True).stdout.strip()
+
+
+def origin_repo(h):
+    """A clone of a bare origin with a fake gh that reads PRs from prs.json."""
+    bare, repo = os.path.join(h, "origin.git"), os.path.join(h, "repo")
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", bare], check=True)
+    subprocess.run(["git", "clone", "-q", bare, repo], check=True, capture_output=True)
+    for k, v in (("user.name", "t"), ("user.email", "t@t"), ("commit.gpgsign", "false")):
+        git(repo, "config", k, v)
+    for f in ("a.txt", "b.txt", "c.txt"):
+        with open(os.path.join(repo, f), "w") as fh:
+            fh.write("base\n")
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "base")
+    git(repo, "push", "-q", "origin", "HEAD:main")
+    prs = os.path.join(h, "prs.json")
+    gh = os.path.join(h, "gh")
+    with open(gh, "w") as fh:
+        fh.write(f"""#!/usr/bin/env python3
+import json, sys
+prs = json.load(open({prs!r}))
+n = next((a for a in sys.argv[3:] if a.isdigit()), "")
+pr = prs.get(n) or {{}}
+print(json.dumps(pr) if "-q" not in sys.argv else pr.get(sys.argv[-1][1:], ""))
+""")
+    os.chmod(gh, os.stat(gh).st_mode | stat.S_IXUSR)
+    return repo, {"SQUAD_GH": gh}, prs
+
+
+def branch(repo, name, path, text):
+    git(repo, "checkout", "-q", "-b", name, "origin/main")
+    with open(os.path.join(repo, path), "w") as fh:
+        fh.write(text)
+    git(repo, "commit", "-qam", name)
+    sha = git(repo, "rev-parse", "HEAD")
+    git(repo, "checkout", "-q", "--detach")
+    return sha
+
+
+def set_prs(prs, **kw):
+    with open(prs, "w") as fh:
+        json.dump({n: {"number": int(n), "baseRefName": "main", "headRefName": b, "headRefOid": s}
+                   for n, (b, s) in kw.items()}, fh)
+
+
+def test_merge_turn_two_sessions_disjoint_prs_merge_without_waiting():
+    h = home()
+    repo, env, prs = origin_repo(h)
+    set_prs(prs, **{"1": ("feat-a", branch(repo, "feat-a", "a.txt", "A\n")),
+                    "2": ("feat-b", branch(repo, "feat-b", "b.txt", "B\n"))})
+    a, b = "aaaa5555-0001", "bbbb6666-0001"
+    assert bash(h, "PreToolUse", a, repo, f"{GM} 1 --squash", env) == "nothing"
+    out = bash(h, "PreToolUse", b, repo, f"{GM} 2 --squash", env)          # only while A's call is running
+    assert "MERGE QUEUE" in out and "is merging" in out and "a few seconds" in out and "PR #1" in out, out
+    assert bash(h, "PreToolUse", b, repo, "git fetch origin && git merge origin/main", env) == "nothing"  # sync: never
+    bash(h, "PostToolUse", a, repo, f"{GM} 1 --squash", env)                 # A's call came back: turn released
+    assert holder(h) is None and queue(h)[0]["last"]["why"] == "done"
+    assert bash(h, "PreToolUse", b, repo, f"{GM} 2 --squash", env) == "nothing"   # B: no queue, no wait
+    bash(h, "PostToolUse", b, repo, f"{GM} 2 --squash", env)
+    assert holder(h) is None
+    # a failed merge call gives the turn back as well
+    assert bash(h, "PreToolUse", a, repo, f"{GM} 1", env) == "nothing"
+    run(h, "PostToolUseFailure", a, os.path.join(h, "t.jsonl"), {"tool_input": {"command": f"{GM} 1"}, "cwd": repo}, env)
+    assert holder(h) is None
+
+
+def test_merge_turn_held_too_long_expires():
     h = home()
     repo, env, _ = repo_with_gh(h)
-    bash(h, "PreToolUse", sid, repo, "cat > n.md <<'E'\ngh pr merge 3\nE\ngh pr merge 14", env)
-    assert holder(h)["pr"] == "14", holder(h)
+    a, b = "aaaa7777-0001", "bbbb8888-0001"
+    assert bash(h, "PreToolUse", a, repo, f"{GM} 10", env) == "nothing"
+    d, path = queue(h)
+    d["holder"]["since"] -= 100
+    with open(path, "w") as fh:
+        json.dump(d, fh)
+    assert "is merging" in bash(h, "PreToolUse", b, repo, f"{GM} 11", env)       # 100 s: still A's
+    d, path = queue(h)
+    d["holder"]["since"] -= 21
+    with open(path, "w") as fh:
+        json.dump(d, fh)
+    assert bash(h, "PreToolUse", b, repo, f"{GM} 11", env) == "nothing"          # 121 s: expired
+    d, _ = queue(h)
+    assert d["holder"]["session"] == b and d["last"]["why"] == "expired" and d["last"]["session"] == a
+    assert "expired" in bash(h, "PostToolUse", a, repo, "ls", env)              # A finds out
+
+
+def test_merge_conflict_with_main_is_denied_with_the_files():
+    h = home()
+    repo, env, prs = origin_repo(h)
+    head = branch(repo, "feat-c", "a.txt", "C\n")
+    with open(os.path.join(repo, "b.txt"), "w") as fh:                         # a second, clean file on the PR
+        fh.write("C\n")
+    git(repo, "checkout", "-q", "feat-c")
+    git(repo, "commit", "-qam", "b")
+    head = git(repo, "rev-parse", "HEAD")
+    set_prs(prs, **{"3": ("feat-c", head)})
+    other = os.path.join(h, "other")                                           # main moves elsewhere: no local ref yet
+    subprocess.run(["git", "clone", "-q", os.path.join(h, "origin.git"), other], check=True, capture_output=True)
+    for k, v in (("user.name", "t"), ("user.email", "t@t")):
+        git(other, "config", k, v)
+    with open(os.path.join(other, "a.txt"), "w") as fh:
+        fh.write("MAIN\n")
+    git(other, "commit", "-qam", "main moves")
+    git(other, "push", "-q", "origin", "HEAD:main")
+    sid = "cccc9999-0001"
+    out = bash(h, "PreToolUse", sid, repo, f"{GM} 3", env)
+    assert "MERGE CONFLICT" in out and "Conflict in: a.txt." in out and "b.txt" not in out, out
+    assert "git merge origin/main" in out and "AgenFK" in out, out
+    assert holder(h) is None                                                   # the turn was released
+    git(repo, "merge", "-q", "-X", "theirs", "origin/main", "-m", "sync")      # resolved: passes, no suite asked
+    set_prs(prs, **{"3": ("feat-c", git(repo, "rev-parse", "HEAD"))})
+    assert bash(h, "PreToolUse", sid, repo, f"{GM} 3", env) == "nothing"
+
+
+def test_turn_status_shows_who_is_merging_and_the_intents():
+    h = home()
+    repo, env, _ = repo_with_gh(h)
+    assert bash(h, "PreToolUse", "eeee1111-0001", repo, "squad-turn request 40", env) == "nothing"
+    assert bash(h, "PreToolUse", "ffff2222-0001", repo, f"{GM} 41", env) == "nothing"
+    e = dict(os.environ, HOME=h)
+    out = subprocess.run([sys.executable, os.path.join(ROOT, "hooks", "squad-turn.py"), "status"], cwd=repo,
+                         capture_output=True, text=True, env=e).stdout
+    assert "merging now: session ffff2222 (PR #41)" in out and "eeee1111 (PR #40)" in out, out
 
 
 if __name__ == "__main__":

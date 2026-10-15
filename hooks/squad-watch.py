@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Squad sentinel: watches every Claude Code session and sub-session from the inside.
 
-Registered on PreToolUse, PostToolUse, SubagentStop and UserPromptSubmit.
+Registered on PreToolUse, PostToolUse, SubagentStop and UserPromptSubmit
+(PostToolUseFailure, where the harness has it, only gives a merge turn back).
 
   PostToolUse       records the call; warns about loops; every CHECK_EVERY seconds
                     reads what was appended to the transcript and redoes the math
@@ -75,26 +76,28 @@ A denied dispatch is never just a "no": the message says where the work continue
                                      there is a slot
   7th reviewer on the same card      the owner's decision, with what keeps failing
 
-Merge queue (one per repository, ~/.claude/squad/turn/): with several sessions
-landing PRs at the same time, every merge moves main under the others and the
-conflict that was resolved comes back. The turn belongs to one session per
-repository:
-  merge (`gh pr merge`, direct push to main, merge_pull_request)
-      turn free or already yours  passes, and the session keeps the turn
-      another session's turn      denied; the session joins the queue and is called
-                                  (MERGE TURN, a note in the session and a prompt
-                                  in the herdr pane)
-  sync with main (`git merge|rebase|pull ... main`, `gh pr update-branch`)
-      while another holds the turn  denied once, with the reason; repeating passes
-                                    (whoever needs what already landed on main is
-                                    not stuck)
-  `squad-turn request [PR] | release | status`   request the turn ahead, give it back, see the queue
-The turn is released when the PR shows as MERGED/CLOSED (gh), by
-`squad-turn release`, after SQUAD_TURN_IDLE (900 s) with no activity from the
-session, after SQUAD_TURN_MAX (3600 s), or after SQUAD_TURN_CLAIM (300 s) if the
-session that was called does not show up. Whoever is in the queue is told which
-files they have in common with what has just landed.
-SQUAD_TURN=0 turns the queue off.
+Merge turn (one per repository, ~/.claude/squad/turn/): the turn covers only the
+merge call itself (`gh pr merge`, direct push to main, merge_pull_request), not
+the sync, the suite or CI. Holding it through all of that left sessions waiting
+for hours.
+  merge call
+      turn free or yours     the PreToolUse takes it; the PostToolUse of the same
+                             call gives it back, success or failure (also on
+                             PostToolUseFailure); a turn held longer than
+                             SQUAD_TURN_HOLD (120 s) expired
+      another session's      denied for those seconds: repeat the merge shortly
+  before a PR merge, with the turn held: `git fetch` of the base and
+      `git merge-tree --write-tree origin/<base> <PR head>`. A conflict is
+      denied (MERGE CONFLICT) with the files and where the work continues; a
+      clean merge passes, with no new suite asked for.
+  seal (opt-in: `git config squad.seal true`, or SQUAD_SEAL=1; SQUAD_SEAL=0 turns
+      it off): a PR merge passes only if the PR head SHA has a SHIP seal, a push
+      to the trunk only if the pushed SHA has one (MERGE SEAL). Seals are written
+      by `squad-seal record` in ~/.claude/squad/seals/<repo hash>/<sha>.json.
+  sync with main is never denied.
+  `squad-turn request [PR] | release | status`   record an intent (it blocks
+      nobody), drop it, see who is merging and the intents
+SQUAD_TURN=0 turns all of it off: the turn, the conflict check and the seal.
 
 The dispatch ceilings exist because of one week of October 2026: orchestrators
 with 420-966k of context, 249 sub-agents (64% of the consumption), five projects
@@ -154,19 +157,27 @@ ORCH_LIVE = 600        # seconds: a sub-session with activity within this interv
 
 
 TURN = os.path.join(BASE, "turn")
-TURN_IDLE = env_int("SQUAD_TURN_IDLE", 900)
-TURN_MAX = env_int("SQUAD_TURN_MAX", 3600)
-TURN_CLAIM = env_int("SQUAD_TURN_CLAIM", 300)
-SYNC_PASS = 900        # seconds during which syncing with main, once warned about, passes
-AT = r"(?:^|[;&|(\n])\s*"                 # only in command position, not inside text
-MERGE_CMD = re.compile(AT + r"(?:gh\s+pr\s+merge\b|git\s+push\b[^|;&\n]*(?:[\s:]|refs/heads/)"
-                            r"(?:main|master)\s*(?:$|[|;&\n)]))")
-SYNC_CMD = re.compile(AT + r"(?:git\s+(?:merge|rebase|pull)\b[^|;&\n]*\b(?:main|master)\b"
-                           r"|gh\s+pr\s+update-branch\b)")
+SEALS = os.path.join(BASE, "seals")
+TURN_HOLD = env_int("SQUAD_TURN_HOLD", 120)    # seconds: a turn held longer than this died with its merge call
+INTENT_TTL = 3600      # seconds an intent from `squad-turn request` stays listed
+AT = r"(?:^|[;&|(\n])\s*"                 # command position, for the squad-turn CLI only
+# The merge patterns match ANYWHERE in the text (bash -c, ssh, eval, xargs, watch...):
+# only spans proven to be data are blanked out first, see merge_text().
+PR_MERGE = re.compile(r"\bgh(?:[ \t]+[^\s;&|]+)*?[ \t]+pr\s+merge\b((?:[ \t]+-[^\s;&|]+)*[ \t]+(?:#?(\d+)\b|\S*/pull/(\d+)))?")
+API_MERGE = re.compile(r"/pulls/(\d+)/merge\b|\bmergePullRequest\b|(?:\bgh\s+api\b|api\.github\.com)[^;&|\n]*/merges\b")
+GIT_PUSH = re.compile(r"\bgit((?:[ \t]+-[Cc][ \t]+\S+|[ \t]+--?[A-Za-z][\w-]*(?:=\S+)?)*)[ \t]+push\b([^;&|\n]*)")
 TURN_CLI = re.compile(AT + r"(?:\S*/)?squad-turn(?:\.py)?\s+(request|release|status)\b(?:\s+#?(\d+))?")
-PR_NUM = re.compile(r"gh\s+pr\s+merge\s+(?:-\S+\s+)*#?(\d+)")
+# What merge_text() may treat as data. Anything else on the line, or any doubt, counts as code.
+OPAQUE = re.compile(r"\$[({'\[]|`|[<>]\(|<<")      # substitutions, ANSI-C quotes, heredocs
+REDIR_OK = re.compile(r"(?:\d*|&)>(?:&\d|>?[ \t]*/dev/null)(?=[\s;&|]|$)")
+DATA_OPTS = {"-m", "--message", "-d", "--description", "--body", "--title", "--evidence"}
+INERT = {"cd", "echo", "printf", "git", "gh", "agenfk", "squad-seal", "squad-turn", "true", "pwd", "ls",
+         "cat", "grep", "rg", "head", "tail", "wc", "sleep", "mkdir"}
+GIT_SAFE = {"commit", "tag", "merge", "notes", "stash", "revert", "cherry-pick", "status", "log", "diff",
+            "add", "show", "branch", "fetch", "push", "rev-parse", "switch", "checkout", "worktree", "pull"}
+GH_SAFE = {"pr", "issue", "release", "repo", "api"}
 BRANCH = re.compile(r"[A-Za-z0-9._/-]{1,200}")
-HEREDOC = re.compile(r"<<-?[ \t]*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+SHA = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 
 
 def ctx_lib():
@@ -557,70 +568,163 @@ def git_dir(cwd):
         return ""
 
 
-def shell_code(cmd):
-    """The command with what the shell does not run as a command blanked out: the
-    inside of quotes, heredoc bodies, comments and escaped characters. Text that
-    only mentions `gh pr merge` (a card description, a commit message, a script
-    fed through a heredoc) then has no command position to match."""
-    out, i, n, heredocs = [], 0, len(cmd), []
+def shell_split(cmd):
+    """Simple commands of a line, each a list of words (start, end, text without
+    quotes). None for anything this reader does not follow exactly as the shell
+    does: a subshell, a redirection other than to /dev/null or another fd, an
+    unterminated quote."""
+    cmds, words, i, n = [], [], 0, len(cmd)
     while i < n:
         c = cmd[i]
-        if c == "\\":
-            out.append(" " * len(cmd[i:i + 2]))
-            i += 2
-        elif c in "'\"":
-            j = i + 1
-            while j < n and cmd[j] != c:
-                j += 2 if c == '"' and cmd[j] == "\\" else 1
-            j = min(j, n)                                  # the closing quote, or the end if unterminated
-            out.append(c + " " * (j - i - 1) + cmd[j:j + 1])
-            i = j + 1
-        elif c == "#" and (i == 0 or cmd[i - 1] in " \t\n;&|("):
-            j = cmd.find("\n", i)
-            j = n if j < 0 else j
-            out.append(" " * (j - i))
-            i = j
-        elif c == "<" and HEREDOC.match(cmd, i):
-            m = HEREDOC.match(cmd, i)
-            heredocs.append(m.group(2))
-            out.append(m.group(0))
+        m = REDIR_OK.match(cmd, i)
+        if m:
             i = m.end()
-        elif c == "\n" and heredocs:
-            out.append(c)
+        elif c in " \t":
             i += 1
-            while heredocs and i < n:                      # each body runs up to its delimiter line
-                j = cmd.find("\n", i)
-                j = n if j < 0 else j
-                if cmd[i:j].strip() == heredocs[0]:
-                    heredocs.pop(0)
-                out.append(" " * (j - i) + cmd[j:j + 1])
-                i = j + 1
+        elif c in ";&|\n":
+            if words:
+                cmds.append(words)
+                words = []
+            i += 1
+        elif c in "()":
+            return None
+        elif c == "#":                                     # a comment runs to the end of the line
+            j = cmd.find("\n", i)
+            i = n if j < 0 else j
         else:
-            out.append(c)
-            i += 1
-    return "".join(out)
+            start, text = i, []
+            while i < n and cmd[i] not in " \t;&|\n()":
+                c = cmd[i]
+                if c == "\\":
+                    text.append(cmd[i + 1:i + 2])
+                    i += 2
+                elif c in "'\"":
+                    j = i + 1
+                    while j < n and cmd[j] != c:
+                        j += 2 if c == '"' and cmd[j] == "\\" else 1
+                    if j >= n:
+                        return None
+                    text.append(cmd[i + 1:j])
+                    i = j + 1
+                elif c in "<>":
+                    return None
+                else:
+                    text.append(c)
+                    i += 1
+            words.append((start, i, "".join(text)))
+    if words:
+        cmds.append(words)
+    return cmds
+
+
+def merge_text(cmd):
+    """The text the merge patterns are matched against: the command without
+    quotes and backslashes (so `gh pr "mer""ge"` still reads as a merge), with
+    the spans that are provably data blanked out. Data is only the value of
+    -m/--message/-d/--description/--body/--title/--evidence, or an argument of
+    echo/printf, and only on a line where every command is one of INERT (git and
+    gh with a safe subcommand). Any substitution, heredoc, subshell, redirection
+    into a file, variable or unknown command makes the whole line count: in
+    doubt, it is a merge."""
+    def plain(s):
+        return re.sub(r"[\\'\"]", "", s)
+    cmds = None if OPAQUE.search(cmd) else shell_split(cmd)
+    if not cmds:
+        return plain(cmd)
+    out = list(cmd)
+    for words in cmds:
+        names = [w[2] for w in words]
+        name = names[0]
+        if "/" in name and os.path.basename(name).removesuffix(".py") in ("squad-seal", "squad-turn"):
+            name = os.path.basename(name).removesuffix(".py")
+        if name not in INERT:
+            return plain(cmd)
+        data = set()
+        if name in ("echo", "printf"):
+            data = set(range(1, len(words)))
+        else:
+            k, sub = 1, ""
+            while k < len(names):
+                if names[k] in ("-C", "-R", "--repo", "--git-dir", "--work-tree"):
+                    k += 2
+                elif names[k].startswith("-"):
+                    k += 1
+                else:
+                    sub = names[k]
+                    break
+            if (name == "git" and ("-c" in names or sub not in GIT_SAFE)) or (name == "gh" and sub not in GH_SAFE):
+                return plain(cmd)
+            for k, w in enumerate(names[1:], 1):
+                if w in DATA_OPTS and k + 1 < len(words):
+                    data.add(k + 1)
+                elif w.startswith("--") and w.split("=", 1)[0] in DATA_OPTS and "=" in w:
+                    data.add(k)
+        for k, (s, e, _) in enumerate(words):
+            if k in data:
+                out[s:e] = " " * (e - s)
+            elif "$" in cmd[s:e]:
+                return plain(cmd)
+    return plain("".join(out))
 
 
 def turn_kind(p):
-    """What the call has to do with the queue: (cli, verb, pr) | (merge, pr) | (sync,) | None."""
+    """What the call has to do with the merge turn: (cli, verb, pr) | (merge, pr)
+    | (push, source, dir) | (many, what) when one call names more than one merge."""
     tool = str(p.get("tool_name") or "")
     inp = p.get("tool_input") or {}
     if tool.endswith("merge_pull_request"):
         return ("merge", str(inp.get("pullNumber") or inp.get("pull_number") or ""))
-    if tool.endswith("update_pull_request_branch"):
-        return ("sync",)
     if tool != "Bash":
         return None
-    cmd = shell_code(str(inp.get("command") or ""))
-    m = TURN_CLI.search(cmd)
-    if m:
-        return ("cli", m.group(1), m.group(2) or "")
-    if MERGE_CMD.search(cmd):
-        m = PR_NUM.search(cmd)
-        return ("merge", m.group(1) if m else "")
-    if SYNC_CMD.search(cmd):
-        return ("sync",)
+    text = merge_text(str(inp.get("command") or ""))
+    found = []
+    for m in PR_MERGE.finditer(text):
+        found.append(("merge", m.group(2) or m.group(3) or ""))
+    for m in API_MERGE.finditer(text):
+        found.append(("merge", m.group(1) or ""))
+    for m in GIT_PUSH.finditer(text):
+        src = push_source(m.group(2), str(p.get("cwd") or ""), m.group(1))
+        if src is not None:
+            d = re.search(r"-C[ \t]+(\S+)", m.group(1))
+            found.append(("push", src, d.group(1) if d else ""))
+    found = list(dict.fromkeys(found))
+    if len(found) > 1:
+        return ("many", ", ".join(f"PR #{f[1]}" if f[0] == "merge" and f[1] else
+                                  "a PR" if f[0] == "merge" else "a push to the trunk" for f in found))
+    if found:
+        return found[0]
+    m = TURN_CLI.search(text)
+    return ("cli", m.group(1), m.group(2) or "") if m else None
+
+
+def push_source(args, cwd, opts=""):
+    """The local revision a `git push` sends to the trunk; None if it does not
+    push to main/master. Any word may be the refspec (in doubt, it is); --all and
+    --mirror push the trunk too; with no refspec, the current branch is pushed."""
+    words = args.split()
+    if "--all" in words or "--mirror" in words:
+        return "main"
+    refs = [w for w in words if not w.startswith("-")]
+    for ref in refs:
+        src, colon, dst = ref.lstrip("+").rpartition(":")
+        if dst.removeprefix("refs/heads/") in ("main", "master"):
+            return src if colon else dst
+    if len(refs) <= 1:
+        d = re.search(r"-C[ \t]+(\S+)", opts)
+        where = os.path.join(cwd, d.group(1)) if d else cwd
+        if where and git_rc(where, "branch", "--show-current")[1] in ("main", "master"):
+            return "HEAD"
     return None
+
+
+def git_rc(cwd, *args, timeout=5):
+    """(returncode, stdout) of a git command in cwd; (1, "") if it could not run."""
+    try:
+        r = subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, timeout=timeout,
+                           stdin=subprocess.DEVNULL)
+        return r.returncode, r.stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return 1, ""
 
 
 def turn_open(repo):
@@ -630,12 +734,14 @@ def turn_open(repo):
     fcntl.flock(lock, fcntl.LOCK_EX)
     d = load(path)
     d["repo"] = repo
-    d.setdefault("queue", [])
+    d.pop("queue", None)          # the long queue of earlier versions: nobody waits in line any more
+    if not isinstance(d.get("intents"), list):
+        d["intents"] = []
     return path, d, lock
 
 
 def turn_mark(session, repo=None):
-    """Cheap marker that the session is in a queue: avoids opening the queue on every call."""
+    """Cheap marker that the session holds a turn: avoids opening the turn file on every call."""
     path = os.path.join(TURN, f"s-{safe(session)}")
     try:
         if repo:
@@ -686,42 +792,44 @@ def gh_pr(cwd, pr, field):
         return ""
 
 
-def pr_state(cwd, pr):
-    return gh_pr(cwd, pr, "state").upper() if str(pr).isdigit() else ""
-
-
-def branch_files(repo, branch):
-    """Files the branch changes relative to the trunk, by the local refs."""
-    if not branch or not BRANCH.fullmatch(branch) or branch.startswith("-"):
-        return set()
-    for base in ("origin/main", "origin/master"):
-        try:
-            r = subprocess.run(["git", "--git-dir", repo, "diff", "--name-only", f"{base}...{branch}"],
-                               capture_output=True, text=True, timeout=5, stdin=subprocess.DEVNULL)
-        except (OSError, subprocess.TimeoutExpired):
-            return set()
-        if r.returncode == 0:
-            return {f for f in r.stdout.splitlines() if f}
-    return set()
-
-
-def common_files(repo, a, b):
-    both = sorted(branch_files(repo, a) & branch_files(repo, b)) if a and b and a != b else []
-    return (", ".join(both[:8]) + (f" and {len(both) - 8} more" if len(both) > 8 else "")) if both else ""
-
-
-def turn_entry(p, pr=""):
-    cwd = str(p.get("cwd") or "")
+def pr_info(cwd, pr):
+    """Number, base branch and head (branch and SHA) of the PR through gh; empty
+    fields for whatever gh could not tell. Every value is checked before it
+    reaches a git command line."""
+    info = {"pr": str(pr) if str(pr).isdigit() else "", "base": "", "branch": "", "sha": ""}
+    if pr and not info["pr"]:
+        return info
     try:
-        r = subprocess.run(["git", "-C", cwd, "branch", "--show-current"], capture_output=True, text=True,
-                           timeout=5, stdin=subprocess.DEVNULL)
-        branch = r.stdout.strip() if r.returncode == 0 else ""
-    except (OSError, subprocess.TimeoutExpired):
-        branch = ""
+        r = subprocess.run([os.environ.get("SQUAD_GH") or "gh", "pr", "view", *([info["pr"]] if pr else []),
+                            "--json", "number,baseRefName,headRefName,headRefOid"], capture_output=True,
+                           text=True, timeout=10, cwd=cwd if cwd and os.path.isdir(cwd) else None,
+                           stdin=subprocess.DEVNULL)
+        d = json.loads(r.stdout) if r.returncode == 0 else {}
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        d = {}
+    if not isinstance(d, dict):
+        d = {}
+    if not info["pr"] and str(d.get("number") or "").isdigit():
+        info["pr"] = str(d["number"])
+    for key, field in (("base", "baseRefName"), ("branch", "headRefName")):
+        v = str(d.get(field) or "")
+        info[key] = v if BRANCH.fullmatch(v) and not v.startswith("-") else ""
+    v = str(d.get("headRefOid") or "")
+    info["sha"] = v if SHA.fullmatch(v) else ""
+    if not info["pr"] and not pr:
+        n = gh_pr(cwd, "", "number")
+        info["pr"] = n if n.isdigit() else ""
+    return info
+
+
+def turn_entry(p, pr="", branch=""):
+    cwd = str(p.get("cwd") or "")
+    if not branch:
+        branch = git_rc(cwd, "branch", "--show-current")[1] if cwd else ""
     now = time.time()
     return {"session": safe(p.get("session_id")), "pr": pr if str(pr).isdigit() else "",
             "branch": branch if BRANCH.fullmatch(branch or "") else "", "cwd": cwd,
-            "pane": os.environ.get("HERDR_PANE_ID") or "", "since": now, "seen": now, "asked": now}
+            "since": now, "asked": now}
 
 
 def who(e):
@@ -729,150 +837,178 @@ def who(e):
         f", branch {e['branch']}" if e.get("branch") else "")
 
 
-YOUR_TURN = ("The main branch does not move while the turn is yours. Now, ONCE only and in the card's worktree: `git fetch "
-             "origin`, `git merge origin/main`, resolve the conflict if there is one, run the suite, `git push` and "
-             "merge the PR. The watcher releases the turn when the PR shows as MERGED; if you give up, `squad-turn release`.")
-
-
-def turn_wake(e):
-    if not (e.get("pane") and os.environ.get("SQUAD_SWITCH") != "0"):
+def turn_release(d, why):
+    h = d.get("holder")
+    if not h:
         return
-    script = os.path.join(os.path.dirname(os.path.realpath(__file__)), "squad-turn.py")
-    try:
-        subprocess.Popen([sys.executable, script, "call", e["pane"], e["session"]],
-                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         start_new_session=True, close_fds=True)
-    except OSError:
-        pass
+    d["last"] = {"session": h["session"], "pr": h.get("pr"), "branch": h.get("branch"),
+                 "at": time.time(), "why": why}
+    d["holder"] = None
+    turn_mark(h["session"])
 
 
-def turn_settle(d, me="", force=False):
-    """Releases the turn of whoever finished or vanished and calls the next in the queue."""
-    now, repo = time.time(), d["repo"]
-    for _ in range(len(d["queue"]) + 1):
-        h = d.get("holder")
-        if h:
-            why = ""
-            if h.get("pr") and (force or now - h.get("checked", 0) > 20):
-                h["checked"] = now
-                state = pr_state(h.get("cwd"), h["pr"])
-                if state in ("MERGED", "CLOSED"):
-                    why = state
-            if not why and h.get("called") and h["seen"] <= h["since"] and now - h["since"] > TURN_CLAIM:
-                why = "no-show"
-            if not why and (now - h["seen"] > TURN_IDLE or now - h["since"] > TURN_MAX):
-                why = "idle"
-            if not why:
-                return
-            d["last"] = {"session": h["session"], "pr": h.get("pr"), "branch": h.get("branch"),
-                         "at": now, "why": why}
-            d["holder"] = None
-            if h["session"] != me:
-                turn_mark(h["session"])
-                if why != "MERGED":
-                    turn_note(h["session"], f"[squad-watch] MERGE QUEUE: your turn in {repo} was released "
-                              f"({why}). To land the PR, `squad-turn request` again.")
-            if why == "MERGED":
-                for e in d["queue"]:
-                    both = common_files(repo, h.get("branch"), e.get("branch"))
-                    if both and e["session"] != me:
-                        turn_note(e["session"], f"[squad-watch] MERGE QUEUE: main moved with PR "
-                                  f"#{h['pr']}, which touches files of your branch {e['branch']}: {both}. "
-                                  "Do not sync yet; on your turn the conflict, if there is one, will be in those.")
-        if not d["queue"]:
-            return
-        e = d["queue"].pop(0)
-        e.update(since=now, seen=now, called=True)
-        d["holder"] = e
-        if e["session"] != me:
-            turn_note(e["session"], f"[squad-watch] MERGE TURN: it is your turn in {repo}"
-                      + (f" (PR #{e['pr']})" if e.get("pr") else "") + f". {YOUR_TURN} With no activity from you in "
-                      f"{TURN_CLAIM // 60} min, the turn passes on.")
-            turn_wake(e)
-            return
+def turn_settle(d, me=""):
+    """Expires a turn whose merge call never came back, and old intents."""
+    now = time.time()
+    h = d.get("holder")
+    if h and now - h.get("since", 0) > TURN_HOLD:
+        turn_release(d, "expired")
+        if h["session"] != me:
+            turn_note(h["session"], f"[squad-watch] MERGE QUEUE: your merge turn in {d['repo']} expired: the "
+                      f"merge call did not come back within {TURN_HOLD} s. If the PR did not land, run the merge again.")
+    d["intents"] = [e for e in d["intents"] if isinstance(e, dict) and now - e.get("asked", 0) < INTENT_TTL]
 
 
-def turn_pre(p, st):
-    """Merge queue on PreToolUse. Returns True if it denied the call."""
+def seal_on(cwd):
+    """The seal is opt-in per repository (`git config squad.seal true`) or by SQUAD_SEAL=1."""
+    env = os.environ.get("SQUAD_SEAL")
+    if env in ("0", "1"):
+        return env == "1"
+    return git_rc(cwd, "config", "--get", "--bool", "squad.seal")[1] == "true"
+
+
+def seal_load(path):
+    d = load(path)
+    return d if d.get("verdict") == "SHIP" and SHA.fullmatch(str(d.get("sha") or "")) else {}
+
+
+def seal_denial(repo, sha, what, branch):
+    """Empty if the SHA has a SHIP seal; otherwise the denial, saying how to seal."""
+    folder = os.path.join(SEALS, hashlib.sha1(repo.encode()).hexdigest()[:16])
+    how = ("Where the work continues: the verifier reviews this exact commit; once it returns SHIP, in the card's "
+           "worktree, with a clean tree at that commit, `squad-seal record --card <id> --model <name> --verdict "
+           "SHIP --evidence <path>` and repeat the merge. `squad-seal show` shows the seal of HEAD.")
+    if not sha:
+        return (f"[squad-watch] MERGE SEAL: the seal is on in this repository and the watcher could not read the "
+                f"SHA of {what} (gh or git did not answer), so the seal cannot be checked. Check `gh pr view` "
+                "(or the ref you push), then repeat the merge. " + how)
+    seal = seal_load(os.path.join(folder, f"{sha}.json"))
+    if seal.get("sha") == sha:
+        return ""
+    other = {}
+    if branch and os.path.isdir(folder):
+        for name in os.listdir(folder):
+            s = seal_load(os.path.join(folder, name)) if name.endswith(".json") else {}
+            if s.get("branch") == branch and str(s.get("at") or "") > str(other.get("at") or ""):
+                other = s
+    return (f"[squad-watch] MERGE SEAL: {what} is at {sha[:12]} and there is no seal for that SHA"
+            + (f"; the seal of branch {branch} is for {other['sha'][:12]} (card {other.get('card')}, "
+               f"{other.get('at')}): the branch moved after the verification" if other else "")
+            + ". A seal records that this exact commit was verified with SHIP. " + how)
+
+
+def conflict_denial(cwd, info, sealed):
+    """Fetches the base and test-merges the PR head into it, without touching
+    any worktree. Empty if it merges cleanly or if the check could not run."""
+    base, sha, pr = info["base"], info["sha"], info["pr"]
+    git_rc(cwd, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}", timeout=20)
+    if git_rc(cwd, "cat-file", "-e", f"{sha}^{{commit}}")[0] != 0:
+        for ref in ([info["branch"]] if info["branch"] else []) + ([f"pull/{pr}/head"] if pr else []):
+            git_rc(cwd, "fetch", "-q", "origin", ref, timeout=20)
+            if git_rc(cwd, "cat-file", "-e", f"{sha}^{{commit}}")[0] == 0:
+                break
+    rc, out = git_rc(cwd, "merge-tree", "--write-tree", "--name-only", f"origin/{base}", sha, timeout=20)
+    if rc != 1:
+        return ""                 # 0: merges cleanly; anything else (old git, missing commit): fails open
+    files = []
+    for f in out.splitlines()[1:]:
+        if not f.strip():
+            break                 # after the blank line come the informational messages
+        if f not in files:
+            files.append(f)
+    listed = ", ".join(files[:12]) + (f" and {len(files) - 12} more" if len(files) > 12 else "")
+    return (f"[squad-watch] MERGE CONFLICT: PR #{pr or '?'}" + (f" ({info['branch']})" if info["branch"] else "")
+            + f" does not merge cleanly into origin/{base} as it is now, after a fetch. Conflict in: "
+            f"{listed or 'files git did not name'}. The merge was not attempted and the turn was released. Where "
+            f"the work continues: in the card's worktree, `git fetch origin && git merge origin/{base}`, resolve "
+            "those files, run the suite, push, and send the card through verification again in AgenFK"
+            + (", then record a new seal for the new HEAD (`squad-seal record ...`)" if sealed else "")
+            + "; then merge. Syncing with main is never denied.")
+
+
+def merge_gate(kind, cwd, repo, info):
+    """Checks that run while the turn is held, right before the merge call."""
+    sealed = seal_on(cwd)
+    if kind[0] == "push":
+        if not sealed:
+            return ""             # a push to the trunk is fast-forward only: git itself refuses a conflict
+        src = kind[1]
+        sha = git_rc(cwd, "rev-parse", "--verify", "-q", f"{src}^{{commit}}")[1] if (
+            src and BRANCH.fullmatch(src) and not src.startswith("-")) else ""     # cwd is already the -C dir
+        branch = git_rc(cwd, "branch", "--show-current")[1]
+        return seal_denial(repo, sha if SHA.fullmatch(sha) else "", f"the push to the trunk ({src or '?'})", branch)
+    if sealed:
+        why = seal_denial(repo, info["sha"], f"the head of PR #{info['pr'] or '?'}", info["branch"])
+        if why:
+            return why
+    if info["sha"] and info["base"]:
+        return conflict_denial(cwd, info, sealed)
+    return ""
+
+
+def turn_pre(p):
+    """Merge turn on PreToolUse. Returns True if it denied the call.
+
+    The turn covers only the merge call itself: taken here, released by the
+    PostToolUse of the same call (success or failure), expired after TURN_HOLD.
+    Requesting and syncing never block anyone."""
     kind = turn_kind(p)
     if not kind or os.environ.get("SQUAD_TURN") == "0":
         return False
-    repo = git_dir(str(p.get("cwd") or ""))
+    cwd = str(p.get("cwd") or "")
+    if kind[0] == "push" and kind[2]:
+        cwd = os.path.join(cwd, kind[2])                   # `git -C <dir> push`: the repository is that one
+    repo = git_dir(cwd)
     if not repo:
         return False
+    if kind[0] == "many":
+        deny(f"[squad-watch] MERGE QUEUE: this call names more than one merge ({kind[1]}), so the turn, the "
+             "conflict check and the seal cannot tell which one to check. Run one merge per call: split the "
+             "command, or move text that only mentions a merge into a -m/--body/--description value.")
+        return True
     me = safe(p.get("session_id"))
+    info = pr_info(cwd, kind[1]) if kind[0] == "merge" else {"pr": "", "branch": ""}
     path, d, lock = turn_open(repo)
+    denied = ""
     try:
         turn_settle(d, me)
         h = d.get("holder")
-        mine = bool(h and h["session"] == me)
-        queued = next((e for e in d["queue"] if e["session"] == me), None)
-        pr = kind[-1] if kind[0] in ("cli", "merge") else ""
-        if kind[0] == "merge" and not pr and p.get("tool_name") == "Bash":
-            pr = gh_pr(str(p.get("cwd") or ""), "", "number")    # without a number MERGED cannot be seen
-        denied = ""
-        if kind[0] == "sync":
-            if h and not mine and time.time() - st.get("sync_ok", 0) > SYNC_PASS:
-                st["sync_ok"] = time.time()
-                denied = (f"[squad-watch] MERGE QUEUE: main is about to move. The merge turn belongs to {who(h)}"
-                          + (f" and there are {len(d['queue'])} in the queue" if d["queue"] else "") + ": syncing now "
-                          "tends to be redone, and the conflict resolved today comes back. To land your PR, request "
-                          "the turn (`squad-turn request <PR>`) and sync only once, when MERGE TURN arrives. "
-                          "If you need what has ALREADY landed on main to continue development, repeat the "
-                          "command: this time it passes.")
-        elif kind[0] == "cli" and kind[1] == "release":
-            if mine:
-                d["last"] = {"session": me, "pr": h.get("pr"), "branch": h.get("branch"),
-                             "at": time.time(), "why": "released"}
-                d["holder"] = None
-                turn_settle(d, me)
-            d["queue"] = [e for e in d["queue"] if e["session"] != me]
-            turn_mark(me)
-        elif kind[0] == "cli" and kind[1] == "status":
-            pass
-        elif mine:
-            h["seen"] = time.time()
-            if pr:
-                h["pr"] = pr
-        elif not h and (not d["queue"] or d["queue"][0]["session"] == me):
-            d["queue"] = [e for e in d["queue"] if e["session"] != me]
-            d["holder"] = turn_entry(p, pr or (queued or {}).get("pr", ""))
-            turn_mark(me, repo)
+        if kind[0] == "cli":
+            if kind[1] in ("request", "release"):
+                d["intents"] = [e for e in d["intents"] if e.get("session") != me]
+            if kind[1] == "request":
+                d["intents"].append(turn_entry(p, kind[2]))
+            elif kind[1] == "release" and h and h["session"] == me:
+                turn_release(d, "released")
+        elif h and h["session"] != me:
+            denied = (f"[squad-watch] MERGE QUEUE: {who(h)} is merging in this repository right now (for "
+                      f"{int(time.time() - h['since'])} s). The turn covers only the merge call and expires after "
+                      f"{TURN_HOLD} s: repeat the merge in a few seconds. There is no queue to join and no need to "
+                      "sync with main because of this.")
         else:
-            if queued:
-                queued["pr"] = pr or queued.get("pr", "")
-            else:
-                queued = turn_entry(p, pr)
-                d["queue"].append(queued)
-                turn_mark(me, repo)
-            if kind[0] == "merge":
-                pos = d["queue"].index(queued) + 1
-                both = common_files(repo, (h or {}).get("branch"), queued.get("branch"))
-                mins = int((time.time() - h["since"]) / 60) if h else 0
-                denied = (f"[squad-watch] MERGE QUEUE: the turn in this repository belongs to {who(h)}, for {mins} min now. "
-                          if h else "[squad-watch] MERGE QUEUE: there are sessions ahead of you. ")
-                denied += (f"You are in the queue, position {pos}. Do not repeat the merge and do NOT sync with "
-                           "main now: it will move before your turn. ")
-                if both:
-                    denied += f"Files in common with the PR that holds the turn: {both}. "
-                if p.get("agent_id"):
-                    denied += ("Report back to the orchestrator: PR ready, waiting for the merge turn; the merge belongs "
-                               "to the main session, when the watcher calls it.")
-                else:
-                    denied += ("Carry on with another step of the request, or stop saying that the PR is waiting for its turn. The watcher "
-                               "announces MERGE TURN in this session" + (" and wakes the pane" if queued.get("pane")
-                                                                         else "")
-                               + ". On your turn: fetch, merge main ONCE, suite, push, merge.")
+            d["holder"] = turn_entry(p, info["pr"], info["branch"])
+            d["intents"] = [e for e in d["intents"] if e.get("session") != me]
+            turn_mark(me, repo)
         save(path, d)
     finally:
         lock.close()
+    if not denied and kind[0] in ("merge", "push"):
+        denied = merge_gate(kind, cwd, repo, info)
+        if denied:
+            path, d, lock = turn_open(repo)
+            try:
+                if (d.get("holder") or {}).get("session") == me:
+                    turn_release(d, "denied")
+                save(path, d)
+            finally:
+                lock.close()
     if denied:
         deny(denied)
     return bool(denied)
 
 
 def turn_post(p):
-    """After the call: keeps the turn alive, releases it once the PR landed and says what to do."""
+    """After the call (success or failure): the merge call gives the turn back."""
     session = safe(p.get("session_id"))
     mark = os.path.join(TURN, f"s-{session}")
     if not os.path.exists(mark):
@@ -883,46 +1019,24 @@ def turn_post(p):
     except OSError:
         return []
     kind = turn_kind(p)
-    out = []
     path, d, lock = turn_open(repo)
     try:
         h = d.get("holder")
-        if h and h["session"] == session:
-            cmd = str((p.get("tool_input") or {}).get("command") or "")
-            if kind or re.search(r"\b(?:git|gh)\s", cmd):     # only merge work keeps the turn alive
-                h["seen"] = time.time()
-            if kind and kind[0] == "merge":
-                turn_settle(d, session, force=True)
-                if not d.get("holder") or d["holder"]["session"] != session:
-                    turn_mark(session)
-                    nxt = d.get("holder")
-                    out.append(f"[squad-watch] MERGE QUEUE: PR #{h.get('pr')} landed on main; the turn was "
-                               "released" + (f" and passed to {who(nxt)}." if nxt else "."))
-                elif not h.get("told"):
-                    h["told"] = True
-                    out.append(f"[squad-watch] MERGE TURN: the turn in this repository is yours. {YOUR_TURN} If the "
-                               "merge has just failed because of a conflict or an out-of-date branch, now is the time "
-                               "to sync.")
-        elif not any(e["session"] == session for e in d["queue"]):
+        if not h or h["session"] != session:
             turn_mark(session)
+        elif kind and kind[0] in ("merge", "push"):
+            turn_release(d, "done")
         save(path, d)
     finally:
         lock.close()
-    return out
+    return []
 
 
 # -------------------------------------------------------------------- events
 def pre_tool(p):
     agent = p.get("agent_id")
-    if turn_kind(p):
-        path = state_path(p.get("session_id"), agent)
-        st = load(path)
-        was = st.get("sync_ok")
-        hit = turn_pre(p, st)
-        if st.get("sync_ok") != was:
-            save(path, st)
-        if hit:
-            return
+    if turn_kind(p) and turn_pre(p):
+        return
     if not agent:
         if p.get("tool_name") in DISPATCH:
             pre_dispatch(p)
@@ -1357,6 +1471,8 @@ def main():
         pre_tool(p)
     elif event == "PostToolUse":
         post_tool(p)
+    elif event == "PostToolUseFailure":
+        turn_post(p)              # a merge call that failed gives the turn back too
     elif event == "SubagentStop":
         subagent_stop(p)
     elif event == "Stop":
