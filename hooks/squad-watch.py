@@ -907,8 +907,10 @@ def conflict_denial(cwd, info, sealed):
             git_rc(cwd, "fetch", "-q", "origin", ref, timeout=20)
             if git_rc(cwd, "cat-file", "-e", f"{sha}^{{commit}}")[0] == 0:
                 break
+    if git_rc(cwd, "rev-parse", "--verify", "-q", f"origin/{base}^{{commit}}")[0] != 0:
+        return ""                 # no such base here: nothing to test against
     rc, out = git_rc(cwd, "merge-tree", "--write-tree", "--name-only", f"origin/{base}", sha, timeout=20)
-    if rc != 1:
+    if rc != 1 or not SHA.fullmatch(out.split("\n", 1)[0]):
         return ""                 # 0: merges cleanly; anything else (old git, missing commit): fails open
     files = []
     for f in out.splitlines()[1:]:

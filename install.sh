@@ -41,8 +41,10 @@ link "$SQUAD/hooks/squad-router.py" "$CLAUDE/hooks/squad-router.py" || rc=1
 link "$SQUAD/hooks/squad-watch.py" "$CLAUDE/hooks/squad-watch.py" || rc=1
 link "$SQUAD/hooks/squad-switch.py" "$CLAUDE/hooks/squad-switch.py" || rc=1
 link "$SQUAD/hooks/squad-turn.py" "$CLAUDE/hooks/squad-turn.py" || rc=1
+link "$SQUAD/hooks/squad-seal.py" "$CLAUDE/hooks/squad-seal.py" || rc=1
 mkdir -p "$HOME/.local/bin"       # the merge queue is called by name: `squad-turn request`
 link "$SQUAD/hooks/squad-turn.py" "$HOME/.local/bin/squad-turn" || rc=1
+link "$SQUAD/hooks/squad-seal.py" "$HOME/.local/bin/squad-seal" || rc=1
 
 echo
 echo "New agents and skills only show up in sessions started after this step."
