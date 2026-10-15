@@ -519,6 +519,42 @@ def test_merge_queue_stalled_turn_passes_on_and_can_be_requested_and_released():
     assert queue(h)[0]["holder"] is None
 
 
+def holder(h):
+    """Who holds the merge turn, or None (also when no merge was ever seen)."""
+    folder = os.path.join(h, ".claude", "squad", "turn")
+    if not os.path.isdir(folder) or not any(n.endswith(".json") for n in os.listdir(folder)):
+        return None
+    return queue(h)[0].get("holder")
+
+
+def test_merge_text_inside_quotes_heredoc_or_comment_does_not_take_the_turn():
+    """October 2026: `agenfk create ... -d "... (gh pr merge, ...)"` took the merge
+    turn. The parenthesis and the newline inside the quoted description looked
+    like a command position; only what the shell runs as a command counts."""
+    h = home()
+    repo, env, _ = repo_with_gh(h)
+    sid = "dddd4444-0001"
+    for cmd in ('agenfk create story x -d "The turn covers the merge (gh pr merge, push to main, '
+                'merge_pull_request)"',
+                'agenfk comment 1 "step 1; gh pr merge 3 after the review"',
+                "agenfk comment 1 'first line\ngh pr merge 5'",
+                'agenfk comment 1 "push it: \\"git push origin HEAD:main\\" | done"',
+                "cat > notes.md <<EOF\nthen\ngh pr merge 9\ngit push origin main\nEOF",
+                "cat > notes.md <<-'X'\n\tgh pr merge 9\n\tX",
+                "ls  # ; gh pr merge 4",
+                "echo \\; gh pr merge 6"):
+        assert bash(h, "PreToolUse", sid, repo, cmd, env) == "nothing", cmd
+        assert holder(h) is None, cmd
+    # the real command after quoted text still takes it, with its own PR number
+    bash(h, "PreToolUse", sid, repo, 'agenfk comment 1 "ready, see gh pr merge 3" && gh pr merge 12 --squash', env)
+    assert holder(h)["session"] == sid and holder(h)["pr"] == "12", holder(h)
+    # and so does a command after a heredoc ends
+    h = home()
+    repo, env, _ = repo_with_gh(h)
+    bash(h, "PreToolUse", sid, repo, "cat > n.md <<'E'\ngh pr merge 3\nE\ngh pr merge 14", env)
+    assert holder(h)["pr"] == "14", holder(h)
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

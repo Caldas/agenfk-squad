@@ -166,6 +166,7 @@ SYNC_CMD = re.compile(AT + r"(?:git\s+(?:merge|rebase|pull)\b[^|;&\n]*\b(?:main|
 TURN_CLI = re.compile(AT + r"(?:\S*/)?squad-turn(?:\.py)?\s+(request|release|status)\b(?:\s+#?(\d+))?")
 PR_NUM = re.compile(r"gh\s+pr\s+merge\s+(?:-\S+\s+)*#?(\d+)")
 BRANCH = re.compile(r"[A-Za-z0-9._/-]{1,200}")
+HEREDOC = re.compile(r"<<-?[ \t]*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
 
 
 def ctx_lib():
@@ -556,6 +557,50 @@ def git_dir(cwd):
         return ""
 
 
+def shell_code(cmd):
+    """The command with what the shell does not run as a command blanked out: the
+    inside of quotes, heredoc bodies, comments and escaped characters. Text that
+    only mentions `gh pr merge` (a card description, a commit message, a script
+    fed through a heredoc) then has no command position to match."""
+    out, i, n, heredocs = [], 0, len(cmd), []
+    while i < n:
+        c = cmd[i]
+        if c == "\\":
+            out.append(" " * len(cmd[i:i + 2]))
+            i += 2
+        elif c in "'\"":
+            j = i + 1
+            while j < n and cmd[j] != c:
+                j += 2 if c == '"' and cmd[j] == "\\" else 1
+            j = min(j, n)                                  # the closing quote, or the end if unterminated
+            out.append(c + " " * (j - i - 1) + cmd[j:j + 1])
+            i = j + 1
+        elif c == "#" and (i == 0 or cmd[i - 1] in " \t\n;&|("):
+            j = cmd.find("\n", i)
+            j = n if j < 0 else j
+            out.append(" " * (j - i))
+            i = j
+        elif c == "<" and HEREDOC.match(cmd, i):
+            m = HEREDOC.match(cmd, i)
+            heredocs.append(m.group(2))
+            out.append(m.group(0))
+            i = m.end()
+        elif c == "\n" and heredocs:
+            out.append(c)
+            i += 1
+            while heredocs and i < n:                      # each body runs up to its delimiter line
+                j = cmd.find("\n", i)
+                j = n if j < 0 else j
+                if cmd[i:j].strip() == heredocs[0]:
+                    heredocs.pop(0)
+                out.append(" " * (j - i) + cmd[j:j + 1])
+                i = j + 1
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
 def turn_kind(p):
     """What the call has to do with the queue: (cli, verb, pr) | (merge, pr) | (sync,) | None."""
     tool = str(p.get("tool_name") or "")
@@ -566,7 +611,7 @@ def turn_kind(p):
         return ("sync",)
     if tool != "Bash":
         return None
-    cmd = str(inp.get("command") or "")
+    cmd = shell_code(str(inp.get("command") or ""))
     m = TURN_CLI.search(cmd)
     if m:
         return ("cli", m.group(1), m.group(2) or "")
