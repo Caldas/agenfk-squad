@@ -202,6 +202,80 @@ def test_seal_on_any_failed_check_denies_the_merge():
     assert "MERGE SEAL" in merge(h, h, gh, SQUAD_SEAL="1")                           # outside any repository
 
 
+def gh_by_target(h, prs):
+    """A fake gh that answers `gh pr view [<target>] [--repo R]` from prs, keyed by
+    "<target>" or "<R> <target>" ("" is the current branch's PR), and logs every argv."""
+    table, log, gh = os.path.join(h, "prs-by-target.json"), os.path.join(h, "gh.log"), os.path.join(h, "gh-target")
+    with open(table, "w") as fh:
+        json.dump(prs, fh)
+    with open(gh, "w") as fh:
+        fh.write(f"""#!/usr/bin/env python3
+import json, sys
+a = sys.argv[1:]
+open({log!r}, "a").write(json.dumps(a) + "\\n")
+t = a[2] if a[:2] == ["pr", "view"] and len(a) > 2 and not a[2].startswith("-") else ""
+key = (a[a.index("--repo") + 1] + " " + t) if "--repo" in a else t
+pr = json.load(open({table!r})).get(key)
+if pr is None:
+    sys.exit(1)
+print(json.dumps(pr) if "-q" not in a else pr.get(a[-1][1:], ""))
+""")
+    os.chmod(gh, os.stat(gh).st_mode | stat.S_IXUSR)
+    return gh, log
+
+
+def test_seal_checks_the_pr_the_merge_names_not_the_current_branch():
+    """Review of the seal: `gh pr merge -t 'T' 7`, `-R o/r 7` and `gh pr merge
+    other-branch` checked the seal of the current branch's PR, because gh pr view
+    was called without the target. The target and --repo now reach gh pr view;
+    with the seal on, a merge whose target cannot be read is denied."""
+    h, repo, ev, _, _ = setup()
+    assert record(h, repo, ev).returncode == 0                                       # the current branch is sealed
+    sealed = git(repo, "rev-parse", "HEAD")
+    git(repo, "checkout", "-q", "-b", "other-branch")
+    with open(os.path.join(repo, "a.txt"), "w") as fh:
+        fh.write("other\n")
+    git(repo, "commit", "-qam", "other")
+    other = git(repo, "rev-parse", "HEAD")
+    git(repo, "checkout", "-q", "feat")
+
+    def pr(n, branch, sha):
+        return {"number": n, "baseRefName": "main", "headRefName": branch, "headRefOid": sha}
+    url = "https://github.com/o/r/pull/7"
+    gh, log = gh_by_target(h, {"": pr(3, "feat", sealed), "7": pr(7, "other-branch", other),
+                               "5": pr(5, "other-branch", other), "o/r 7": pr(7, "other-branch", other),
+                               "o/r 5": pr(5, "other-branch", other), "other-branch": pr(9, "other-branch", other),
+                               url: pr(7, "other-branch", other)})
+    git(repo, "config", "squad.seal", "true")
+    assert merge(h, repo, gh, GM) == "nothing"                                       # no target: the current PR
+    for cmd, argv in ((f"{GM} -t 'T' 7", ["7"]), (f"{GM} -R o/r 7", ["7", "--repo", "o/r"]),
+                      (f"{GM} --repo o/r 5", ["5", "--repo", "o/r"]), (f"{GM} --body x 5", ["5"]),
+                      (f"{GM} other-branch", ["other-branch"]), (f"{GM} {url}", [url]),
+                      (f"{GM} --repo=o/r -st T '#7' -d", ["7", "--repo", "o/r"]), (f"{GM} -m 7", ["7"]),
+                      (f"{GM} -sRo/r --match-head-commit {other} -- 7", ["7", "--repo", "o/r"]),
+                      (f"cd {repo} && {GM} -b 'x y' -A a@b -F - 7 --auto 2>&1", ["7"])):
+        os.remove(log) if os.path.exists(log) else None
+        out = merge(h, repo, gh, cmd)
+        assert "MERGE SEAL" in out and f"is at {other[:12]}" in out, (cmd, out)
+        with open(log) as fh:
+            calls = [json.loads(line) for line in fh]
+        assert ["pr", "view", *argv] == calls[0][:2 + len(argv)] and calls[0][2 + len(argv)] == "--json", (cmd, calls)
+    for cmd in (f"{GM} --frobnicate 7", f"{GM} 7 8", f"{GM} 7 -t", f"{GM} --repo o/r", f'{GM} "$PR"',
+                f"timeout 60 {GM} 7", f"{GM} 'x;y'", f"{GM} -R 'o r' 7"):
+        out = merge(h, repo, gh, cmd)
+        assert "cannot tell which PR" in out and "squad-seal record" in out, (cmd, out)
+        assert merge(h, repo, gh, cmd, SQUAD_SEAL="0") == "nothing", cmd               # seal off: the turn only
+    p = {"hook_event_name": "PreToolUse", "session_id": "abab1212-0001", "transcript_path": os.path.join(h, "t.jsonl"),
+         "tool_name": "mcp__github__merge_pull_request", "tool_input": {"owner": "o", "repo": "r", "pullNumber": 7},
+         "cwd": repo}
+    out = subprocess.run([sys.executable, WATCH], input=json.dumps(p), capture_output=True, text=True,
+                         env=env(h, SQUAD_GH=gh)).stdout
+    assert "MERGE SEAL" in out and f"is at {other[:12]}" in out, out                # the MCP tool names its repo too
+    git(repo, "checkout", "-q", "other-branch")
+    assert record(h, repo, report(h, other)).returncode == 0
+    assert merge(h, repo, gh, f"{GM} -t 'T' -R o/r 7") == "nothing"                  # the named PR is sealed: passes
+
+
 def test_install_links_squad_seal_like_squad_turn():
     h = tempfile.mkdtemp(prefix="install-")
     e = env(h, CLAUDE_CONFIG_DIR=os.path.join(h, "claude"), PATH="/usr/bin:/bin")

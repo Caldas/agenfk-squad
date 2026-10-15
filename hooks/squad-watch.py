@@ -186,6 +186,13 @@ GIT_SAFE = {"commit", "tag", "merge", "notes", "stash", "revert", "cherry-pick",
 GH_SAFE = {"pr", "issue", "release", "repo", "api"}
 BRANCH = re.compile(r"[A-Za-z0-9._/-]{1,200}")
 SHA = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
+# `gh pr merge` flags (gh 2.x `--help`): which take a value, which do not. Any other flag makes the target unknown.
+MERGE_VALUED = {"-A", "--author-email", "-b", "--body", "-F", "--body-file", "--match-head-commit",
+                "-t", "--subject", "-R", "--repo"}
+MERGE_BOOL = {"--admin", "--auto", "-d", "--delete-branch", "--disable-auto", "-m", "--merge", "-r", "--rebase",
+              "-s", "--squash", "--help"}
+PR_URL = re.compile(r"https://[A-Za-z0-9.-]+/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/pull/\d+/?")
+GH_REPO = re.compile(r"(?:[A-Za-z0-9.-]+/)?[A-Za-z0-9._-]+/[A-Za-z0-9._-]+")
 
 
 def ctx_lib():
@@ -675,21 +682,96 @@ def merge_text(cmd):
     return plain("".join(out))
 
 
+def merge_target(args):
+    """(target, repo) of one `gh pr merge`, from its words after `merge`: the PR
+    number, URL or branch ("" for the current branch's PR) and the --repo value.
+    None when this reader cannot tell for sure: an unknown flag, more than one
+    argument, a flag with no value, a value it does not accept."""
+    target, repo, i = [], "", 0
+    while i < len(args):
+        w = args[i]
+        i += 1
+        if w == "--":
+            target += args[i:]
+            break
+        if w.startswith("--"):
+            name, eq, val = w.partition("=")
+            if name in MERGE_VALUED:
+                if not eq:
+                    if i >= len(args):
+                        return None
+                    val, i = args[i], i + 1
+                if name == "--repo":
+                    repo = val
+            elif name not in MERGE_BOOL:
+                return None
+        elif w.startswith("-") and len(w) > 1:
+            for j, c in enumerate(w[1:], 2):               # -sd, -t subject, -tsubject, -sRo/r
+                if "-" + c in MERGE_BOOL:
+                    continue
+                if "-" + c not in MERGE_VALUED:
+                    return None
+                val = w[j:]
+                if not val:
+                    if i >= len(args):
+                        return None
+                    val, i = args[i], i + 1
+                if c == "R":
+                    repo = val
+                break
+        else:
+            target.append(w)
+    if len(target) > 1:
+        return None
+    t = target[0] if target else ""
+    t = t[1:] if re.fullmatch(r"#\d+", t) else t
+    if t and not (t.isdigit() or PR_URL.fullmatch(t) or (BRANCH.fullmatch(t) and not t.startswith("-"))):
+        return None
+    if repo and not (t and GH_REPO.fullmatch(repo)):
+        return None               # gh itself refuses --repo with no PR named
+    return t, repo
+
+
+def merge_targets(cmd):
+    """(target, repo) or None for each `gh pr merge` that is a simple command of
+    its own, in order; None for the whole line if it cannot be read word by word."""
+    cmds = None if OPAQUE.search(cmd) else shell_split(cmd)
+    if cmds is None:
+        return None
+    out = []
+    for words in cmds:
+        names = [w[2] for w in words]
+        if os.path.basename(names[0]) == "gh" and names[1:3] == ["pr", "merge"]:
+            out.append(merge_target(names[3:]))
+    return out
+
+
 def turn_kind(p):
-    """What the call has to do with the merge turn: (cli, verb, pr) | (merge, pr)
-    | (push, source, dir) | (many, what) when one call names more than one merge."""
+    """What the call has to do with the merge turn: (cli, verb, pr) | (merge,
+    shown, target) | (push, source, dir) | (many, what) when one call names more
+    than one merge. target is (PR, repo) for gh pr view, or None when the watcher
+    cannot tell which PR the call merges; shown is only for naming it."""
     tool = str(p.get("tool_name") or "")
     inp = p.get("tool_input") or {}
     if tool.endswith("merge_pull_request"):
-        return ("merge", str(inp.get("pullNumber") or inp.get("pull_number") or ""))
+        n = str(inp.get("pullNumber") or inp.get("pull_number") or "")
+        repo = f"{inp.get('owner') or ''}/{inp.get('repo') or ''}"
+        repo = repo if GH_REPO.fullmatch(repo) else ""
+        return ("merge", n, (n, repo) if n.isdigit() and (repo or not inp.get("repo")) else None)
     if tool != "Bash":
         return None
-    text = merge_text(str(inp.get("command") or ""))
+    cmd = str(inp.get("command") or "")
+    text = merge_text(cmd)
     found = []
-    for m in PR_MERGE.finditer(text):
-        found.append(("merge", m.group(2) or m.group(3) or ""))
+    merges = list(PR_MERGE.finditer(text))
+    targets = merge_targets(cmd) if merges else []
+    for i, m in enumerate(merges):
+        # the regex finds the merge anywhere (bash -c, ssh, xargs...); which PR it merges is read
+        # only from a plain `gh pr merge` command, and only when every merge found is one
+        target = targets[i] if targets is not None and len(targets) == len(merges) else None
+        found.append(("merge", m.group(2) or m.group(3) or "", target))
     for m in API_MERGE.finditer(text):
-        found.append(("merge", m.group(1) or ""))
+        found.append(("merge", m.group(1) or "", (m.group(1), "") if m.group(1) else None))
     for m in GIT_PUSH.finditer(text):
         src = push_source(m.group(2), str(p.get("cwd") or ""), m.group(1))
         if src is not None:
@@ -800,15 +882,15 @@ def gh_pr(cwd, pr, field):
         return ""
 
 
-def pr_info(cwd, pr):
-    """Number, base branch and head (branch and SHA) of the PR through gh; empty
-    fields for whatever gh could not tell. Every value is checked before it
-    reaches a git command line."""
-    info = {"pr": str(pr) if str(pr).isdigit() else "", "base": "", "branch": "", "sha": ""}
-    if pr and not info["pr"]:
-        return info
+def pr_info(cwd, target, repo=""):
+    """Number, base branch and head (branch and SHA) of the PR the merge names
+    (number, URL or branch, from merge_target; "" for the current branch's PR),
+    in --repo if it named one, through gh; empty fields for whatever gh could
+    not tell. Every value is checked before it reaches a git command line."""
+    info = {"pr": target if target.isdigit() else "", "base": "", "branch": "", "sha": ""}
     try:
-        r = subprocess.run([os.environ.get("SQUAD_GH") or "gh", "pr", "view", *([info["pr"]] if pr else []),
+        r = subprocess.run([os.environ.get("SQUAD_GH") or "gh", "pr", "view", *([target] if target else []),
+                            *(["--repo", repo] if repo else []),
                             "--json", "number,baseRefName,headRefName,headRefOid"], capture_output=True,
                            text=True, timeout=10, cwd=cwd if cwd and os.path.isdir(cwd) else None,
                            stdin=subprocess.DEVNULL)
@@ -824,7 +906,7 @@ def pr_info(cwd, pr):
         info[key] = v if BRANCH.fullmatch(v) and not v.startswith("-") else ""
     v = str(d.get("headRefOid") or "")
     info["sha"] = v if SHA.fullmatch(v) else ""
-    if not info["pr"] and not pr:
+    if not info["pr"] and not target:
         n = gh_pr(cwd, "", "number")
         info["pr"] = n if n.isdigit() else ""
     return info
@@ -881,12 +963,15 @@ def seal_load(path):
     return d if d.get("verdict") == "SHIP" and SHA.fullmatch(str(d.get("sha") or "")) else {}
 
 
+SEAL_HOW = ("Where the work continues: the verifier reviews this exact commit; once it returns SHIP, in the card's "
+            "worktree, with a clean tree at that commit, `squad-seal record --card <id> --model <name> --verdict "
+            "SHIP --evidence <path>` and repeat the merge. `squad-seal show` shows the seal of HEAD.")
+
+
 def seal_denial(repo, sha, what, branch):
     """Empty if the SHA has a SHIP seal; otherwise the denial, saying how to seal."""
     folder = os.path.join(SEALS, hashlib.sha1(repo.encode()).hexdigest()[:16])
-    how = ("Where the work continues: the verifier reviews this exact commit; once it returns SHIP, in the card's "
-           "worktree, with a clean tree at that commit, `squad-seal record --card <id> --model <name> --verdict "
-           "SHIP --evidence <path>` and repeat the merge. `squad-seal show` shows the seal of HEAD.")
+    how = SEAL_HOW
     if not sha:
         return (f"[squad-watch] MERGE SEAL: the seal is on in this repository and the watcher could not read the "
                 f"SHA of {what} (gh or git did not answer), so the seal cannot be checked. Check `gh pr view` "
@@ -948,6 +1033,12 @@ def merge_gate(kind, cwd, repo, info):
             src and BRANCH.fullmatch(src) and not src.startswith("-")) else ""     # cwd is already the -C dir
         branch = git_rc(cwd, "branch", "--show-current")[1]
         return seal_denial(repo, sha if SHA.fullmatch(sha) else "", f"the push to the trunk ({src or '?'})", branch)
+    if sealed and kind[2] is None:
+        return ("[squad-watch] MERGE SEAL: the seal is on and the watcher cannot tell which PR this call merges "
+                f"({'PR #' + kind[1] if kind[1] else 'no PR it can read'}): the merge is not a plain `gh pr merge "
+                "[<number> | <url> | <branch>]` with the flags of `gh pr merge --help`, so the seal cannot be "
+                "checked. Run the merge as its own command, `gh pr merge <number> [--repo owner/repo] [--squash]`, "
+                "from the card's worktree. " + SEAL_HOW)
     if sealed:
         why = seal_denial(repo, info["sha"], f"the head of PR #{info['pr'] or '?'}", info["branch"])
         if why:
@@ -982,7 +1073,9 @@ def turn_pre(p):
              "command, or move text that only mentions a merge into a -m/--body/--description value.")
         return True
     me = safe(p.get("session_id"))
-    info = pr_info(cwd, kind[1]) if kind[0] == "merge" else {"pr": "", "branch": ""}
+    info = {"pr": "", "base": "", "branch": "", "sha": ""}
+    if kind[0] == "merge" and kind[2] is not None:
+        info = pr_info(cwd, *kind[2])
     path, d, lock = turn_open(repo)
     denied = ""
     try:
