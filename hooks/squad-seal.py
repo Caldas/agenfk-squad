@@ -2,8 +2,9 @@
 """The squad's seal: a record that one exact commit was verified with SHIP.
 
     squad-seal record --card <id> --model <name> --verdict SHIP --evidence <path>
-        run inside the card's worktree; seals HEAD. Refuses a dirty worktree and
-        any verdict other than SHIP.
+        run inside the card's worktree; seals HEAD. Refuses a dirty worktree
+        (untracked files included), any verdict other than SHIP, and evidence
+        that is not the verifier's report of HEAD itself (<sha>.md).
     squad-seal show [sha]
         prints the seal of the SHA (HEAD by default); exit 1 if there is none.
 
@@ -13,6 +14,12 @@ sha, card, at, model, verdict and evidence. With the seal on in a repository
 (`git config squad.seal true`, or SQUAD_SEAL=1), squad-watch lets a PR merge
 through only if the PR head has a seal, and a push to the trunk only if the
 pushed SHA has one.
+
+What this protects against: an agent's mistake (merging what was not verified,
+or a SHA that moved after the verdict), not someone set on getting around it.
+The hook reads command text and seal files the same user can write. The
+guarantee comes from the squad/seal commit status required by the branch
+protection on the trunk.
 """
 import argparse
 import hashlib
@@ -58,10 +65,13 @@ def record(a):
               + "). The seal covers a commit: commit or clean these, have the verifier review that commit, "
               "then seal it.", file=sys.stderr)
         return 1
-    if not os.path.isfile(a.evidence):
-        print(f"squad-seal: evidence {a.evidence} is not a file.", file=sys.stderr)
-        return 1
     _, sha = git("rev-parse", "HEAD")
+    name = os.path.basename(a.evidence)
+    if not (name.endswith(".md") and len(name) >= 15 and sha.startswith(name[:-3])) or not os.path.isfile(a.evidence):
+        print(f"squad-seal: the evidence must be the verifier's report of this very commit, a file named "
+              f"{sha}.md (or a prefix of at least 12 characters of it, .md); got {a.evidence}. An older report "
+              "does not cover HEAD: have the verifier review this commit.", file=sys.stderr)
+        return 1
     _, branch = git("branch", "--show-current")
     seal = {"repo": repo, "branch": branch, "sha": sha, "card": a.card,
             "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "model": a.model,

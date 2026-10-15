@@ -41,9 +41,7 @@ def setup():
         fh.write("a\n")
     git(repo, "add", ".")
     git(repo, "commit", "-qm", "a")
-    ev = os.path.join(h, "evidence.md")
-    with open(ev, "w") as fh:
-        fh.write("SHIP\n")
+    ev = report(h, git(repo, "rev-parse", "HEAD"))
     head = os.path.join(h, "pr-head")
     gh = os.path.join(h, "gh")
     with open(gh, "w") as fh:
@@ -55,6 +53,14 @@ print(json.dumps({{"number": 5, "baseRefName": "main", "headRefName": "feat",
     os.chmod(gh, os.stat(gh).st_mode | stat.S_IXUSR)
     point(head, git(repo, "rev-parse", "HEAD"))
     return h, repo, ev, head, gh
+
+
+def report(h, sha):
+    """The verifier's report of this commit, named after it."""
+    path = os.path.join(h, f"{sha}.md")
+    with open(path, "w") as fh:
+        fh.write("SHIP\n")
+    return path
 
 
 def point(head, sha):
@@ -133,6 +139,7 @@ def test_seal_on_merge_needs_a_seal_of_the_pr_head():
         fh.write("after the review\n")
     git(repo, "commit", "-qam", "after")
     point(head, git(repo, "rev-parse", "HEAD"))
+    assert record(h, repo, ev).returncode == 1                         # the old report does not cover the new HEAD
     out = merge(h, repo, gh)                                           # a seal of another SHA does not count
     assert "MERGE SEAL" in out and f"is for {sealed[:12]}" in out and "moved after the verification" in out, out
     assert merge(h, repo, gh, SQUAD_SEAL="0") == "nothing"
@@ -149,6 +156,50 @@ def test_seal_on_push_to_trunk_needs_a_seal_of_the_pushed_sha():
     assert record(h, repo, ev).returncode == 0
     assert merge(h, repo, gh, "git push origin HEAD:main") == "nothing"
     assert merge(h, repo, gh, "git push origin feat") == "nothing"     # not the trunk: no seal needed
+
+
+def test_record_refuses_evidence_that_is_not_the_report_of_head():
+    h, repo, ev, _, _ = setup()
+    other = os.path.join(h, "notes.md")
+    with open(other, "w") as fh:
+        fh.write("SHIP\n")
+    for bad in (other, os.path.join(h, "0" * 40 + ".md"), os.path.join(h, "missing", os.path.basename(ev))):
+        r = record(h, repo, bad)
+        assert r.returncode == 1 and "report of this very commit" in r.stderr, (bad, r.stderr)
+    short = os.path.join(h, os.path.basename(ev)[:12] + ".md")
+    os.rename(ev, short)
+    assert record(h, repo, short).returncode == 0                      # a 12-character prefix is enough
+
+
+def fake_gh(h, body, code=0):
+    gh = os.path.join(h, "gh-broken")
+    with open(gh, "w") as fh:
+        fh.write(f"#!/usr/bin/env python3\nimport sys\nprint({body!r})\nsys.exit({code})\n")
+    os.chmod(gh, os.stat(gh).st_mode | stat.S_IXUSR)
+    return gh
+
+
+def test_seal_on_any_failed_check_denies_the_merge():
+    h, repo, ev, head, gh = setup()
+    git(repo, "config", "squad.seal", "true")
+    assert record(h, repo, ev).returncode == 0 and merge(h, repo, gh) == "nothing"
+    assert "MERGE SEAL" in merge(h, repo, fake_gh(h, "boom", 1))                     # gh fails
+    assert "MERGE SEAL" in merge(h, repo, fake_gh(h, '{"number": 5}'))               # no PR head SHA
+    assert "MERGE SEAL" in merge(h, repo, gh, "git push origin no-such-ref:main")    # git cannot resolve
+    folder = os.path.join(h, ".claude", "squad", "seals")
+    (sub,) = os.listdir(folder)
+    (name,) = os.listdir(os.path.join(folder, sub))
+    with open(os.path.join(folder, sub, name), "w") as fh:
+        fh.write("{not json")
+    assert "MERGE SEAL" in merge(h, repo, gh)                                        # unreadable seal
+    turn = os.path.join(h, ".claude", "squad", "turn")
+    subprocess.run(["rm", "-rf", turn], check=True)
+    with open(turn, "w") as fh:                                                      # the check raises
+        fh.write("not a directory")
+    out = merge(h, repo, gh)
+    assert "MERGE SEAL" in out and "check failed" in out, out
+    os.remove(turn)
+    assert "MERGE SEAL" in merge(h, h, gh, SQUAD_SEAL="1")                           # outside any repository
 
 
 def test_install_links_squad_seal_like_squad_turn():

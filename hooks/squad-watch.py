@@ -98,6 +98,14 @@ for hours.
   `squad-turn request [PR] | release | status`   record an intent (it blocks
       nobody), drop it, see who is merging and the intents
 SQUAD_TURN=0 turns all of it off: the turn, the conflict check and the seal.
+With the seal on, a check that cannot run (git or gh failing or timing out, an
+unreadable seal, an unknown PR head, an exception) denies the merge. Merge
+commands are recognised in any position (bash -c, ssh, eval, xargs, watch...);
+text counts as data only as the value of -m/-d/--body/--title/--description/
+--evidence or an echo/printf argument on a line of inert commands. This guards
+against an agent's mistake, not against someone set on getting around it: the
+guarantee comes from the squad/seal commit status required by the branch
+protection on the trunk.
 
 The dispatch ceilings exist because of one week of October 2026: orchestrators
 with 420-966k of context, 249 sub-agents (64% of the consumption), five projects
@@ -718,13 +726,13 @@ def push_source(args, cwd, opts=""):
 
 
 def git_rc(cwd, *args, timeout=5):
-    """(returncode, stdout) of a git command in cwd; (1, "") if it could not run."""
+    """(returncode, stdout) of a git command in cwd; (-1, "") if it could not run or timed out."""
     try:
         r = subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, timeout=timeout,
                            stdin=subprocess.DEVNULL)
         return r.returncode, r.stdout.strip()
     except (OSError, subprocess.TimeoutExpired):
-        return 1, ""
+        return -1, ""
 
 
 def turn_open(repo):
@@ -864,7 +872,8 @@ def seal_on(cwd):
     env = os.environ.get("SQUAD_SEAL")
     if env in ("0", "1"):
         return env == "1"
-    return git_rc(cwd, "config", "--get", "--bool", "squad.seal")[1] == "true"
+    rc, out = git_rc(cwd, "config", "--get", "--bool", "squad.seal")
+    return out == "true" or rc == -1          # git did not answer: in doubt the seal is on (fail closed)
 
 
 def seal_load(path):
@@ -962,6 +971,10 @@ def turn_pre(p):
         cwd = os.path.join(cwd, kind[2])                   # `git -C <dir> push`: the repository is that one
     repo = git_dir(cwd)
     if not repo:
+        if kind[0] in ("merge", "push", "many") and os.environ.get("SQUAD_SEAL") == "1":
+            deny("[squad-watch] MERGE SEAL: SQUAD_SEAL=1 and this merge does not run inside a git repository, so "
+                 "the seal cannot be checked. Run the merge from the card's worktree.")
+            return True
         return False
     if kind[0] == "many":
         deny(f"[squad-watch] MERGE QUEUE: this call names more than one merge ({kind[1]}), so the turn, the "
@@ -1037,8 +1050,20 @@ def turn_post(p):
 # -------------------------------------------------------------------- events
 def pre_tool(p):
     agent = p.get("agent_id")
-    if turn_kind(p) and turn_pre(p):
-        return
+    kind = turn_kind(p)
+    try:
+        if kind and turn_pre(p):
+            return
+    except Exception as exc:
+        # With the seal on, a check that broke denies: it never passes by omission.
+        if kind and kind[0] in ("merge", "push", "many") and os.environ.get("SQUAD_TURN") != "0" and (
+                seal_on(str(p.get("cwd") or ""))):
+            deny(f"[squad-watch] MERGE SEAL: the seal is on and the merge check failed ({type(exc).__name__}), "
+                 "so the merge is denied rather than let through unchecked. Where the work continues: run "
+                 "`squad-seal show` and `gh pr view` in the card's worktree to see what is failing, fix it, and "
+                 "repeat the merge; if it keeps failing, the decision is the owner's.")
+            return
+        raise
     if not agent:
         if p.get("tool_name") in DISPATCH:
             pre_dispatch(p)
