@@ -1,0 +1,266 @@
+# ci-light: cheap checks only. Lint, terraform, semgrep and trivy.
+#
+# Tests, build and heavy review run in AgenFK before the PR is opened; the code
+# that reaches the trunk already carries the AgenFK seal. This workflow does NOT
+# run the test suite or the build. See README.md next to this file.
+#
+# Copy to .github/workflows/ci-light.yml in the project. Jobs switch themselves
+# on from what the repository contains (package.json lint script, Python files,
+# *.tf files). Every action is pinned to a commit SHA; the version is in the
+# trailing comment. Target: under 5 minutes.
+
+name: ci-light
+
+on:
+  pull_request:
+  push:
+    branches: [main] # the trunk; rename if the project uses another branch
+
+# One run per PR (or per ref on push). A new push to a PR cancels the run in
+# progress; runs on the trunk are never cancelled, so every trunk commit gets
+# a complete result.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Nothing by default; each job asks for the minimum it needs.
+permissions: {}
+
+env:
+  # Pin these to the versions the project uses.
+  TERRAFORM_VERSION: latest
+  NODE_VERSION_FALLBACK: lts/* # used only when there is no .nvmrc / .node-version
+  PNPM_VERSION_FALLBACK: "10" # used only when package.json has no packageManager field
+  TRIVY_VERSION: v0.75.0
+
+jobs:
+  detect:
+    name: detect
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+    outputs:
+      node_lint: ${{ steps.scan.outputs.node_lint }}
+      node_pm: ${{ steps.scan.outputs.node_pm }}
+      node_lockfile: ${{ steps.scan.outputs.node_lockfile }}
+      node_version_file: ${{ steps.scan.outputs.node_version_file }}
+      pnpm_version: ${{ steps.scan.outputs.pnpm_version }}
+      python: ${{ steps.scan.outputs.python }}
+      terraform: ${{ steps.scan.outputs.terraform }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Detect what the repository has
+        id: scan
+        run: |
+          set -euo pipefail
+          out() { echo "$1=$2" >> "$GITHUB_OUTPUT"; echo "$1=$2"; }
+
+          # Node: only when the root package.json declares a "lint" script.
+          node_lint=false node_pm=npm node_lockfile=false node_version_file='' pnpm_version=''
+          if [ -f package.json ] && jq -e '.scripts.lint // empty' package.json > /dev/null; then
+            node_lint=true
+            pm_field=$(jq -r '.packageManager // ""' package.json)
+            if [ -f pnpm-lock.yaml ] || [[ "$pm_field" == pnpm@* ]]; then
+              node_pm=pnpm
+              if [ -f pnpm-lock.yaml ]; then node_lockfile=true; fi
+              # pnpm/action-setup fails when an explicit version differs from
+              # packageManager, and needs one when packageManager is not set.
+              if [ -z "$pm_field" ]; then pnpm_version="$PNPM_VERSION_FALLBACK"; fi
+            elif [ -f package-lock.json ]; then
+              node_lockfile=true
+            fi
+            for f in .nvmrc .node-version; do
+              if [ -f "$f" ]; then node_version_file="$f"; break; fi
+            done
+          fi
+          out node_lint "$node_lint"
+          out node_pm "$node_pm"
+          out node_lockfile "$node_lockfile"
+          out node_version_file "$node_version_file"
+          out pnpm_version "$pnpm_version"
+
+          # Python: any tracked .py file or a pyproject.toml.
+          if [ -n "$(git ls-files -- '*.py' 'pyproject.toml' | head -n1)" ]; then
+            out python true
+          else
+            out python false
+          fi
+
+          # Terraform: any tracked .tf file.
+          if [ -n "$(git ls-files -- '*.tf' | head -n1)" ]; then
+            out terraform true
+          else
+            out terraform false
+          fi
+
+  lint-node:
+    name: lint (node)
+    needs: detect
+    if: needs.detect.outputs.node_lint == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - if: needs.detect.outputs.node_pm == 'pnpm'
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: ${{ needs.detect.outputs.pnpm_version }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ${{ needs.detect.outputs.node_version_file }}
+          node-version: ${{ needs.detect.outputs.node_version_file == '' && env.NODE_VERSION_FALLBACK || '' }}
+          cache: ${{ needs.detect.outputs.node_lockfile == 'true' && needs.detect.outputs.node_pm || '' }}
+          package-manager-cache: false
+      - name: Install dependencies
+        env:
+          NODE_PM: ${{ needs.detect.outputs.node_pm }}
+          HAS_LOCKFILE: ${{ needs.detect.outputs.node_lockfile }}
+        run: |
+          set -euo pipefail
+          if [ "$NODE_PM" = pnpm ]; then
+            if [ "$HAS_LOCKFILE" = true ]; then pnpm install --frozen-lockfile; else pnpm install; fi
+          else
+            if [ "$HAS_LOCKFILE" = true ]; then npm ci; else npm install --no-audit --no-fund; fi
+          fi
+      - name: Lint
+        env:
+          NODE_PM: ${{ needs.detect.outputs.node_pm }}
+        run: |
+          set -euo pipefail
+          if [ "$NODE_PM" = pnpm ]; then pnpm run lint; else npm run lint; fi
+
+  lint-python:
+    name: lint (ruff)
+    needs: detect
+    if: needs.detect.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Runs `ruff check` with the project's ruff config (pyproject.toml /
+      # ruff.toml) or ruff's defaults when there is none.
+      - uses: astral-sh/ruff-action@278981a28ce3188b1e39527901f38254bf3aac89 # v4.1.0
+
+  terraform:
+    name: terraform (fmt, validate)
+    needs: detect
+    if: needs.detect.outputs.terraform == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    env:
+      TF_IN_AUTOMATION: "1"
+      TF_INPUT: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+      - name: terraform fmt -check
+        run: terraform fmt -check -recursive -diff
+      # init without a backend: no state is read, no credential is needed and
+      # nothing is created. validate checks syntax and internal consistency
+      # only; it does not compare the code with any real account.
+      - name: terraform validate (every directory with .tf files, no backend)
+        run: |
+          set -euo pipefail
+          export TF_PLUGIN_CACHE_DIR="$RUNNER_TEMP/tf-plugin-cache"
+          mkdir -p "$TF_PLUGIN_CACHE_DIR"
+          status=0
+          while IFS= read -r dir; do
+            echo "::group::$dir"
+            if terraform -chdir="$dir" init -backend=false -input=false -no-color > /dev/null \
+              && terraform -chdir="$dir" validate -no-color; then
+              echo "::endgroup::"
+            else
+              echo "::endgroup::"
+              echo "::error::terraform validate failed in $dir"
+              status=1
+            fi
+          done < <(git ls-files -- '*.tf' | xargs -r -n1 dirname | sort -u)
+          exit "$status"
+
+  semgrep:
+    name: semgrep
+    # Dependabot PRs get no secrets and only touch manifests.
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    container:
+      image: semgrep/semgrep:1.180.0@sha256:529ee8a277ec8adc5b534d7c74eea0a47e9de21d62852b6ba7ac6ba9566845c3
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # With SEMGREP_APP_TOKEN: `semgrep ci` (rules and triage from the Semgrep
+      # AppSec Platform, diff-aware on PRs). Without it (or on PRs from forks,
+      # which receive no secrets): the public p/default ruleset, metrics off.
+      - name: semgrep
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+        run: |
+          if [ -n "${SEMGREP_APP_TOKEN:-}" ]; then
+            semgrep ci
+          else
+            semgrep scan --config p/default --error --metrics=off
+          fi
+
+  trivy:
+    name: trivy (vuln, secret, misconfig)
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+          # The action restores its vulnerability DB under the workspace.
+          skip-dirs: .cache/trivy
+
+  # One stable check name for branch protection. Skipped jobs count as passed;
+  # a failed or cancelled job fails the gate.
+  ci-light:
+    name: ci-light
+    if: always()
+    needs: [detect, lint-node, lint-python, terraform, semgrep, trivy]
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    permissions: {}
+    steps:
+      - name: Every job passed or was skipped
+        env:
+          RESULTS: ${{ toJSON(needs.*.result) }}
+        run: |
+          echo "results: $RESULTS"
+          if echo "$RESULTS" | grep -qE '"(failure|cancelled)"'; then
+            echo "::error::at least one ci-light job failed or was cancelled"
+            exit 1
+          fi
