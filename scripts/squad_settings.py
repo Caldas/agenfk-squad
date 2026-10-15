@@ -20,10 +20,16 @@ Guarantees:
     settings, is never written: the command stops with exit code 2;
   - a settings.json that is a symlink stays a symlink: its target is updated.
 
-A hook entry is the squad's when its command names one of the manifest's
-scripts (by file name), whatever the path: entries registered by hand from
-docs/installation.md are recognised, kept on install and removed on uninstall.
+A hook entry is the squad's only when its command is `python3 <path>` (or
+`python <path>`), nothing more, and <path>, after ~ and $VARS are expanded,
+is <config>/hooks/<script> for one of the manifest's scripts, or resolves to
+one of them inside the clone this script belongs to. So the entries from
+docs/installation.md (`python3 ~/.claude/hooks/squad-watch.py`) are
+recognised, kept on install and removed on uninstall, while a hook of the
+user's that merely shares a file name (`python3 /opt/mine/squad-watch.py`,
+`grep squad-router.py log`) is never touched.
 """
+import contextlib
 import argparse
 import json
 import os
@@ -87,15 +93,23 @@ def check_shape(settings):
     return None
 
 
-def names_script(command, scripts):
-    """True when the command runs one of these scripts (compared by file name)."""
+def squad_script(command, config, clone=ROOT):
+    """The squad script this hook command runs, or None when it is not the squad's."""
     if not isinstance(command, str):
-        return False
+        return None
     try:
         words = shlex.split(command)
     except ValueError:
-        words = command.split()
-    return any(os.path.basename(w) in scripts for w in words)
+        return None
+    if len(words) != 2 or words[0] not in ("python3", "python"):
+        return None
+    path = os.path.abspath(os.path.expandvars(os.path.expanduser(words[1])))
+    script = os.path.basename(path)
+    linked = os.path.join(config, "hooks", script)
+    real = os.path.realpath(path)
+    if real in (os.path.realpath(linked), os.path.join(os.path.realpath(clone), "hooks", script)):
+        return script
+    return None
 
 
 def command_for(config, script):
@@ -109,7 +123,7 @@ def install(settings, config, plan, matchers, report):
         groups = settings.get("hooks", {}).get(event, [])
         missing = []
         for script, timeout in wanted:
-            there = any(names_script(h.get("command"), {script})
+            there = any(squad_script(h.get("command"), config) == script
                         for g in groups for h in g.get("hooks", []) if isinstance(h, dict))
             if there:
                 report.append(f"on      {script:<16} {event} (already registered)")
@@ -130,7 +144,7 @@ def install(settings, config, plan, matchers, report):
     return changed
 
 
-def uninstall(settings, scripts, report):
+def uninstall(settings, config, scripts, report):
     """Removes every hook entry that runs one of the squad's scripts, then the
     groups and events that only held those. Returns True when settings changed."""
     hooks = settings.get("hooks")
@@ -143,7 +157,7 @@ def uninstall(settings, scripts, report):
         for g in groups:
             entries = g.get("hooks", [])
             kept = [h for h in entries
-                    if not (isinstance(h, dict) and names_script(h.get("command"), scripts))]
+                    if not (isinstance(h, dict) and squad_script(h.get("command"), config) in scripts)]
             for h in entries:
                 if h not in kept:
                     report.append(f"off     {event}: {h.get('command')}")
@@ -172,6 +186,7 @@ def backup_path(path):
 
 def write(path, settings):
     """Backs the current file up, then replaces it atomically. Returns the backup path."""
+    text = json.dumps(settings, indent=2, ensure_ascii=False) + "\n"
     bak = None
     if os.path.exists(path):
         bak = backup_path(path)
@@ -179,11 +194,16 @@ def write(path, settings):
     target = os.path.realpath(path)          # a symlinked settings.json keeps its link
     os.makedirs(os.path.dirname(target), exist_ok=True)
     tmp = f"{target}.tmp-{os.getpid()}"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        fh.write(json.dumps(settings, indent=2, ensure_ascii=False) + "\n")
-    if os.path.exists(target):
-        shutil.copymode(target, tmp)
-    os.replace(tmp, target)
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        if os.path.exists(target):
+            shutil.copymode(target, tmp)
+        os.replace(tmp, target)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
     return bak
 
 
@@ -207,7 +227,7 @@ def main(argv=None):
     if a.action == "install":
         changed = install(settings, config, plan, matchers, report)
     else:
-        changed = uninstall(settings, set(scripts), report)
+        changed = uninstall(settings, config, set(scripts), report)
     for line in report:
         print(line)
     if changed:
