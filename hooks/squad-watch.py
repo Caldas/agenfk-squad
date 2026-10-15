@@ -77,7 +77,7 @@ A denied dispatch is never just a "no": the message says where the work continue
   7th reviewer on the same card      the owner's decision, with what keeps failing
 
 Merge turn (one per repository, ~/.claude/squad/turn/): the turn covers only the
-merge call itself (`gh pr merge`, direct push to main, merge_pull_request), not
+merge call itself (`gh pr merge`, direct push to the trunk, merge_pull_request), not
 the sync, the suite or CI. Holding it through all of that left sessions waiting
 for hours.
   merge call
@@ -94,6 +94,10 @@ for hours.
       it off): a PR merge passes only if the PR head SHA has a SHIP seal, a push
       to the trunk only if the pushed SHA has one (MERGE SEAL). Seals are written
       by `squad-seal record` in ~/.claude/squad/seals/<repo hash>/<sha>.json.
+  trunk: main, master, the remote's default branch (origin/HEAD, or `gh repo
+      view` when that ref is missing) and `git config squad.trunk` (a
+      comma-separated list); a push whose destination, or whose push target with
+      no refspec, is one of them is a push to the trunk.
   sync with main is never denied.
   `squad-turn request [PR] | release | status`   record an intent (it blocks
       nobody), drop it, see who is merging and the intents
@@ -787,22 +791,46 @@ def turn_kind(p):
     return ("cli", m.group(1), m.group(2) or "") if m else None
 
 
+def trunks(cwd):
+    """Branches that count as the trunk, in order: `git config squad.trunk` (a
+    comma-separated list), the remote's default branch (origin/HEAD, or gh when
+    that ref is missing), then main and master."""
+    names = git_rc(cwd, "config", "--get", "squad.trunk")[1].split(",")
+    rc, head = git_rc(cwd, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+    if rc == 0 and head.startswith("origin/"):
+        names.append(head[len("origin/"):])
+    elif git_rc(cwd, "remote", "get-url", "origin")[0] == 0:
+        try:
+            r = subprocess.run([os.environ.get("SQUAD_GH") or "gh", "repo", "view", "--json", "defaultBranchRef",
+                                "-q", ".defaultBranchRef.name"], capture_output=True, text=True, timeout=8,
+                               cwd=cwd, stdin=subprocess.DEVNULL)
+            names.append(r.stdout.strip() if r.returncode == 0 else "")
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    names = [n.strip().removeprefix("refs/heads/") for n in names + ["main", "master"]]
+    return [n for n in dict.fromkeys(names) if BRANCH.fullmatch(n) and not n.startswith("-")]
+
+
 def push_source(args, cwd, opts=""):
-    """The local revision a `git push` sends to the trunk; None if it does not
-    push to main/master. Any word may be the refspec (in doubt, it is); --all and
-    --mirror push the trunk too; with no refspec, the current branch is pushed."""
+    """The local revision a `git push` sends to the trunk (see trunks); None if
+    it does not push to the trunk. Any word may be the refspec (in doubt, it is);
+    --all and --mirror push the trunk too; with no refspec, the current branch is
+    pushed, to the trunk if it is the trunk or if its push target is."""
+    d = re.search(r"-C[ \t]+(\S+)", opts)
+    where = os.path.join(cwd, d.group(1)) if d else cwd
+    trunk = trunks(where) if where else ["main", "master"]
     words = args.split()
     if "--all" in words or "--mirror" in words:
-        return "main"
+        return trunk[0]
     refs = [w for w in words if not w.startswith("-")]
     for ref in refs:
         src, colon, dst = ref.lstrip("+").rpartition(":")
-        if dst.removeprefix("refs/heads/") in ("main", "master"):
+        if dst.removeprefix("refs/heads/") in trunk:
             return src if colon else dst
-    if len(refs) <= 1:
-        d = re.search(r"-C[ \t]+(\S+)", opts)
-        where = os.path.join(cwd, d.group(1)) if d else cwd
-        if where and git_rc(where, "branch", "--show-current")[1] in ("main", "master"):
+    if len(refs) <= 1 and where:
+        target = git_rc(where, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{push}")[1]
+        if (git_rc(where, "branch", "--show-current")[1] in trunk
+                or target.partition("/")[2] in trunk):
             return "HEAD"
     return None
 

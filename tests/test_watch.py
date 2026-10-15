@@ -675,6 +675,72 @@ def test_turn_status_shows_who_is_merging_and_the_intents():
     assert "merging now: session ffff2222 (PR #41)" in out and "eeee1111 (PR #40)" in out, out
 
 
+def beta_origin(h):
+    """origin_repo whose default branch is beta (origin/HEAD -> origin/beta)."""
+    repo, env, prs = origin_repo(h)
+    git(repo, "push", "-q", "origin", "HEAD:beta")
+    git(repo, "fetch", "-q", "origin")
+    git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/beta")
+    git(repo, "checkout", "-q", "-b", "feat", "origin/beta")
+    return repo, env, prs
+
+
+def test_push_to_the_remote_default_branch_is_a_push_to_the_trunk():
+    """Review of October 2026: with beta as the default branch, `git push origin
+    HEAD:beta` went past the turn and the seal, which only knew main/master."""
+    h = home()
+    repo, env, _ = beta_origin(h)
+    sid = "abab1111-0001"
+    for cmd in ("git push origin HEAD:beta", "git push origin feat:beta", "git push origin +feat:refs/heads/beta"):
+        assert bash(h, "PreToolUse", sid, repo, cmd, env) == "nothing", cmd          # seal off: takes the turn
+        assert holder(h)["session"] == sid, cmd
+        bash(h, "PostToolUse", sid, repo, cmd, env)
+        out = bash(h, "PreToolUse", sid, repo, cmd, {**env, "SQUAD_SEAL": "1"})
+        assert "MERGE SEAL" in out and "push to the trunk" in out, (cmd, out)
+    for cmd in ("git push origin feat", "git push origin HEAD:feat-2", "git push -u origin feat:beta-notes"):
+        assert bash(h, "PreToolUse", sid, repo, cmd, {**env, "SQUAD_SEAL": "1"}) == "nothing", cmd
+        assert holder(h) is None, cmd
+
+
+def test_trunk_from_gh_when_origin_head_is_missing_and_from_squad_trunk():
+    h = home()
+    repo, env, prs = beta_origin(h)
+    git(repo, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD")
+    sealed = {**env, "SQUAD_SEAL": "1"}
+    assert bash(h, "PreToolUse", "abab2222-0001", repo, "git push origin HEAD:beta", sealed) == "nothing"
+    with open(prs, "w") as fh:
+        json.dump({"": {"defaultBranchRef.name": "beta"}}, fh)       # what `gh repo view` answers
+    assert "MERGE SEAL" in bash(h, "PreToolUse", "abab2222-0001", repo, "git push origin HEAD:beta", sealed)
+    git(repo, "config", "squad.trunk", "release, stable")
+    for dst in ("release", "stable"):
+        out = bash(h, "PreToolUse", "abab2222-0001", repo, f"git push origin HEAD:{dst}", sealed)
+        assert "MERGE SEAL" in out, (dst, out)
+
+
+def test_push_with_no_refspec_to_a_trunk_upstream_is_a_push_to_the_trunk():
+    """A branch that tracks origin/beta with push.default=upstream sends `git push`
+    to beta: the watcher reads the push target, not the branch name."""
+    h = home()
+    repo, env, _ = beta_origin(h)
+    sealed = {**env, "SQUAD_SEAL": "1"}
+    assert bash(h, "PreToolUse", "abab3333-0001", repo, "git push", sealed) == "nothing"   # simple: feat -> feat
+    git(repo, "branch", "-q", "--set-upstream-to", "origin/beta")
+    git(repo, "config", "push.default", "upstream")
+    for cmd in ("git push", "git push origin"):
+        assert "MERGE SEAL" in bash(h, "PreToolUse", "abab3333-0001", repo, cmd, sealed), cmd
+
+
+def test_turn_status_compares_against_the_remote_default_branch():
+    h = home()
+    repo, env, _ = beta_origin(h)
+    with open(os.path.join(repo, "a.txt"), "w") as fh:
+        fh.write("feat\n")
+    git(repo, "commit", "-qam", "feat")
+    out = subprocess.run([sys.executable, os.path.join(ROOT, "hooks", "squad-turn.py"), "status"], cwd=repo,
+                         capture_output=True, text=True, env=dict(os.environ, HOME=h, **env)).stdout
+    assert "feat x origin/beta" in out and "merges without conflict" in out, out
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

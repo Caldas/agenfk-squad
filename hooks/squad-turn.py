@@ -31,6 +31,25 @@ def git(*args, cwd=None):
         return 1, ""
 
 
+def trunks():
+    """The trunk, as squad-watch sees it: `git config squad.trunk`, the remote's
+    default branch (origin/HEAD, or gh when that ref is missing), main, master."""
+    names = git("config", "--get", "squad.trunk")[1].split(",")
+    rc, head = git("symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+    if rc == 0 and head.startswith("origin/"):
+        names.append(head[len("origin/"):])
+    elif git("remote", "get-url", "origin")[0] == 0:
+        try:
+            r = subprocess.run([os.environ.get("SQUAD_GH") or "gh", "repo", "view", "--json", "defaultBranchRef",
+                                "-q", ".defaultBranchRef.name"], capture_output=True, text=True, timeout=8,
+                               stdin=subprocess.DEVNULL)
+            names.append(r.stdout.strip() if r.returncode == 0 else "")
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    names = [n.strip().removeprefix("refs/heads/") for n in names + ["main", "master"]]
+    return [n for n in dict.fromkeys(names) if n and not n.startswith("-")]
+
+
 def age(ts):
     return f"{int((time.time() - ts) / 60)} min"
 
@@ -63,8 +82,8 @@ def status():
         print(f"  last: session {last['session'][:8]}" + (f" PR #{last['pr']}" if last.get("pr") else "")
               + f" — {last['why']}, {age(last['at'])} ago")
     _, mine = git("branch", "--show-current")
-    base = next((b for b in ("origin/main", "origin/master")
-                 if git("rev-parse", "--verify", "-q", b)[0] == 0), "")
+    base = next((f"origin/{b}" for b in trunks()
+                 if git("rev-parse", "--verify", "-q", f"origin/{b}")[0] == 0), "")
     if mine and base:
         rc, out = git("merge-tree", "--write-tree", "--name-only", base, mine)
         if rc == 1:
