@@ -52,7 +52,9 @@ run_target() {
   local name="$1" config="$2" prefix="$3"
   local files ranges excluded mutate
   # A prefix that names nothing in the tree is a typo, not "no changes": fail instead of skipping green.
-  if ! git -c core.quotePath=false ls-files | grep -qE "^${prefix}"; then
+  # No `grep -q`: it exits on the first match, ls-files dies of SIGPIPE, and pipefail reads that as
+  # "no match" on any repository large enough to fill the pipe.
+  if ! git -c core.quotePath=false ls-files | grep -E "^${prefix}" >/dev/null; then
     echo "::error::mutation-since: TARGETS prefix '${prefix}' (${name}) matches no tracked file."
     return 1
   fi
