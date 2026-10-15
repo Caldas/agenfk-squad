@@ -55,6 +55,22 @@ Recommend only **safe** levers: a smaller model on a mechanical step, cache,
 smaller card scope, fewer fix rounds. **Never** recommend cutting independent
 review, tests or the mutation gate to save money.
 
+## Meter 3: CI minutes
+
+- **Data:** the billing API (`/orgs/<org>/settings/billing/usage`; personal
+  account: `/users/<user>/settings/billing/usage`) and
+  `actions/runs/<id>/jobs` for each run. GitHub rounds **each job** up to the
+  minute: sum `ceil(duration/60)` per job. That estimate came within 2% of the
+  invoice on a real project; check it against the billing API anyway.
+- **Report:** minutes per job, per PR branch (and runs per branch), and the
+  minutes spent on **CANCELLED** jobs.
+- **Price per minute** with source and date: Linux 2-core US$ 0.006/min
+  (`docs.github.com/en/billing/reference/actions-runner-pricing`, read on
+  2026-10-15). Read it again before quoting.
+- **Project the month** with and without the change, against the plan's quota.
+
+The commands and the order of the cuts are in the `ci-cost` skill.
+
 ## Deliverable
 
 The tables, the total, what you could **not** confirm and, if there is a card,
