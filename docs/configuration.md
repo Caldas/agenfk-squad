@@ -79,10 +79,19 @@ denial after 3 identical calls in a row.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `SQUAD_TURN_IDLE` | 900 | Seconds without activity from the holding session before the turn is released |
-| `SQUAD_TURN_MAX` | 3600 | Seconds after which the turn is released in any case |
-| `SQUAD_TURN_CLAIM` | 300 | Seconds a called session has to show up before the turn passes on |
+| `SQUAD_TURN_HOLD` | 120 | Seconds a merge call may hold the turn; a turn held longer expires (the call never came back) |
+| `SQUAD_TURN` | unset | `0` turns off the turn, the conflict check and the seal |
+| `SQUAD_SEAL` | unset | `1` turns the merge seal on, `0` off; unset, `git config squad.seal` decides |
 | `SQUAD_GH` | `gh` | The GitHub CLI binary used to read a PR's state |
+
+Per repository, with `git config`:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `squad.seal` | `false` | `true`: a PR merge or a push to the trunk passes only if the SHA has a SHIP seal (`squad-seal record`) |
+| `squad.trunk` | unset | Comma-separated branches that also count as the trunk, besides main, master and the remote's default branch |
+
+`SQUAD_TURN_IDLE`, `SQUAD_TURN_MAX` and `SQUAD_TURN_CLAIM` were removed: the turn now covers only the merge call itself.
 
 ## The session switch
 

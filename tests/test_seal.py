@@ -326,6 +326,19 @@ def test_install_links_squad_seal_like_squad_turn():
         assert os.path.islink(link) and os.path.realpath(link) == os.path.realpath(SEAL), link
 
 
+def test_install_names_post_tool_use_failure_and_the_changed_variables():
+    """An install that keeps the old hook list leaves a failed merge holding the
+    turn for SQUAD_TURN_HOLD; install.sh says so, and which variables changed."""
+    h = tempfile.mkdtemp(prefix="install-")
+    e = env(h, CLAUDE_CONFIG_DIR=os.path.join(h, "claude"), PATH="/usr/bin:/bin")
+    out = subprocess.run(["bash", os.path.join(ROOT, "install.sh")], capture_output=True, text=True, env=e).stdout
+    assert "PostToolUseFailure" in out and "SQUAD_TURN_HOLD" in out, out
+    for removed in ("SQUAD_TURN_IDLE", "SQUAD_TURN_MAX", "SQUAD_TURN_CLAIM"):
+        assert removed in out and "removed" in out, (removed, out)
+    for new in ("SQUAD_SEAL", "squad.seal", "squad.trunk"):
+        assert new in out, (new, out)
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

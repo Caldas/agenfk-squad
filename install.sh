@@ -49,5 +49,10 @@ link "$SQUAD/hooks/squad-seal.py" "$HOME/.local/bin/squad-seal" || rc=1
 echo
 echo "New agents and skills only show up in sessions started after this step."
 echo "Hooks in settings.json (see docs/installation.md): squad-router.py on UserPromptSubmit;"
-echo "squad-watch.py on PreToolUse, PostToolUse, SubagentStop, Stop and UserPromptSubmit."
+echo "squad-watch.py on PreToolUse, PostToolUse, PostToolUseFailure, SubagentStop, Stop and UserPromptSubmit."
+echo "Register PostToolUseFailure too: without it, a merge that fails holds the merge turn until"
+echo "it expires (SQUAD_TURN_HOLD, 120 s)."
+echo "Changed in the merge turn: SQUAD_TURN_IDLE, SQUAD_TURN_MAX and SQUAD_TURN_CLAIM were removed;"
+echo "SQUAD_TURN_HOLD, SQUAD_SEAL, \`git config squad.seal\` and \`git config squad.trunk\` are new"
+echo "(see docs/configuration.md)."
 exit $rc
