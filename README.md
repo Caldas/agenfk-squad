@@ -137,7 +137,7 @@ Full catalogue with limits: [docs/agents.md](docs/agents.md).
 
 ## The watcher in one screen
 
-`hooks/squad-watch.py` runs on five Claude Code hook events and speaks to the
+`hooks/squad-watch.py` runs on six Claude Code hook events and speaks to the
 session in messages that start with `[squad-watch]`.
 
 | It sees | It does |

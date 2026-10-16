@@ -1,7 +1,7 @@
 # The watcher
 
 `hooks/squad-watch.py` is one Python file, standard library only, registered on
-five Claude Code hook events. It reads the transcript of every session and
+six Claude Code hook events. It reads the transcript of every session and
 sub-session, does a fixed piece of arithmetic, and acts. It never crashes a
 session: any error ends silently with exit code 0 and a line in
 `~/.claude/squad/watch-errors.log`.
@@ -27,6 +27,7 @@ measured. `SQUAD_WATCH=0` turns it off.
 | `SubagentStop` | Writes the sub-session's metrics to `metrics.jsonl` and leaves a note for the parent when the sub-session ended badly. |
 | `UserPromptSubmit` | Delivers pending notes to the main session. |
 | `Stop` | Main session at handoff level: if it stopped without writing the handoff, the stop is blocked and the order repeated; if it stops again without one, the watcher writes a minimal handoff itself. With a handoff on disk and nothing running in the background, it launches the session switch. |
+| `PreCompact` | Main session, `/compact` or auto-compact: before the conversation is summarized, writes the same minimal handoff to `~/.claude/squad/handoffs/<session>-compact.md`. It prints nothing, so it never blocks the compaction, and it never switches the session. |
 
 Reading the transcript is incremental: the watcher keeps a byte offset per
 session and parses only whole lines added since the last look, so it costs the
@@ -210,6 +211,12 @@ Nothing is interrupted mid-task.
   blocked and the order repeated. If it stops again without one, the
   watcher writes a minimal handoff on its own, from what it can verify: git
   state, the owner's last request, the denied dispatches.
+- Before a compaction (`/compact`, or auto-compact), the watcher writes the
+  same minimal handoff to `<session>-compact.md`, with the trigger (`manual`
+  or `auto`) and the instructions given to `/compact` in its header. The
+  summary that replaces the conversation keeps the decisions only in summary
+  form; the file keeps git, the request and the denied briefs as they were.
+  Sub-sessions are skipped.
 
 If the alert no longer applies (the context dropped after a compaction, for
 example) the watcher says so with `ALERT CANCELLED`.

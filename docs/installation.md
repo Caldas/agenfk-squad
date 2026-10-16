@@ -125,6 +125,13 @@ have. Replace `~/.claude` with the absolute path if your shell does not expand
           { "type": "command", "command": "python3 ~/.claude/hooks/squad-watch.py", "timeout": 10 }
         ]
       }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          { "type": "command", "command": "python3 ~/.claude/hooks/squad-watch.py", "timeout": 20 }
+        ]
+      }
     ]
   }
 }
@@ -133,10 +140,14 @@ have. Replace `~/.claude` with the absolute path if your shell does not expand
 | Script | Events |
 |---|---|
 | `squad-router.py` | `UserPromptSubmit` |
-| `squad-watch.py` | `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `SubagentStop`, `Stop` |
+| `squad-watch.py` | `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `SubagentStop`, `Stop`, `PreCompact` |
 
 `squad-switch.py` and `squad-turn.py` are not registered: the watcher starts
 them when needed.
+
+`PreCompact` has no matcher, so it covers both a manual `/compact` and an
+auto-compact. Its timeout is longer because it runs three `git` commands
+before writing the handoff; a timeout never blocks the compaction.
 
 You can adopt the squad in stages. The agents and skills work without any
 hook. The router works without the watcher. The watcher works without herdr.

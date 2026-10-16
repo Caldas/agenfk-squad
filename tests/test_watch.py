@@ -26,7 +26,7 @@ def home():
     return tempfile.mkdtemp(prefix="watch-")
 
 
-def run(h, event, sid, transcript, extra=None, env=None):
+def run_proc(h, event, sid, transcript, extra=None, env=None):
     p = {"hook_event_name": event, "session_id": sid, "transcript_path": transcript,
          "tool_name": "Bash", "tool_input": {"command": "ls"}, "cwd": h}
     p.update(extra or {})
@@ -36,7 +36,11 @@ def run(h, event, sid, transcript, extra=None, env=None):
             del e[key]
     e.update(env or {})
     return subprocess.run([sys.executable, HOOK], input=json.dumps(p), capture_output=True,
-                          text=True, env=e).stdout.strip()
+                          text=True, env=e)
+
+
+def run(h, event, sid, transcript, extra=None, env=None):
+    return run_proc(h, event, sid, transcript, extra, env).stdout.strip()
 
 
 def session(h, sid, ctx, share, burn=60):
@@ -420,6 +424,103 @@ def test_session_that_does_not_write_the_handoff_the_watcher_takes_over_and_swit
     assert "written by squad-watch" in body and "deliver card ABC-1" in body, body
     assert f"{sid}-dispatches.md" in body and "UNKNOWN" in body, body
     assert "\n## Next step\n" in body, body
+
+
+def compact_handoff(h, sid):
+    return os.path.join(h, ".claude", "squad", "handoffs", f"{sid}-compact.md")
+
+
+def dirty_repo(h):
+    repo = os.path.join(h, "repo")
+    subprocess.run(["git", "init", "-q", "-b", "feat/compact", repo], check=True)
+    for key, value in (("user.name", "t"), ("user.email", "t@t"), ("commit.gpgsign", "false")):
+        git(repo, "config", key, value)
+    with open(os.path.join(repo, "a.txt"), "w") as fh:
+        fh.write("base\n")
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "first commit of the card")
+    with open(os.path.join(repo, "half-done.py"), "w") as fh:
+        fh.write("x = 1\n")
+    return repo
+
+
+def test_compaction_writes_the_handoff_before_the_conversation_is_summarized():
+    """A /compact, or an auto-compact, used to run with nothing on disk: the
+    decisions were summarized away and git, the owner's request and the denied
+    briefs were not written anywhere."""
+    for trigger, instructions in (("manual", "keep the merge plan"), ("auto", None)):
+        h = home()
+        sid = f"c0c0c0c0-{trigger}"
+        repo = dirty_repo(h)
+        tr = session(h, sid, 300_000, 0.9)
+        run(h, "UserPromptSubmit", sid, tr, {"prompt": "deliver card ABC-2", "cwd": repo})
+        briefs = os.path.join(h, ".claude", "squad", "handoffs", f"{sid}-dispatches.md")
+        os.makedirs(os.path.dirname(briefs), exist_ok=True)
+        with open(briefs, "w") as fh:
+            fh.write("## brief\n")
+        r = run_proc(h, "PreCompact", sid, tr, {"trigger": trigger, "custom_instructions": instructions,
+                                                "cwd": repo})
+        assert r.returncode == 0 and r.stdout.strip() == "", r      # never blocks the compaction
+        with open(compact_handoff(h, sid)) as fh:
+            body = fh.read()
+        assert "written by squad-watch" in body and f"compacted ({trigger})" in body, body
+        assert "stopped without writing" not in body, body           # the header says why it was written
+        assert "Branch: feat/compact" in body and "?? half-done.py" in body, body
+        assert "first commit of the card" in body and "deliver card ABC-2" in body, body
+        assert briefs in body and "\n## Next step\n" in body, body
+        if instructions:                                             # what the owner typed after /compact
+            assert f"Compact instructions:** {instructions}" in body, body
+        else:
+            assert "Compact instructions" not in body, body
+        assert not os.path.exists(os.path.join(h, ".claude", "squad", "handoffs", f"{sid}-watch.md"))
+
+
+def test_compaction_of_a_sub_session_writes_nothing():
+    h = home()
+    sid = "c0c0c0c0-0002"
+    r = run_proc(h, "PreCompact", sid, session(h, sid, 300_000, 0.9),
+                 {"trigger": "auto", "custom_instructions": None, "agent_id": "agent-1"})
+    assert r.returncode == 0 and r.stdout.strip() == "", r
+    assert not os.path.exists(os.path.join(h, ".claude", "squad", "handoffs")), os.listdir(h)
+
+
+def test_compaction_at_handoff_level_never_switches_the_session():
+    h = home()
+    sid = "c0c0c0c0-0003"
+    herdr, sent = fake_herdr(h, sid)
+    env = {"HERDR_PANE_ID": "w1:p1", "HERDR_BIN_PATH": herdr}
+    tr = session(h, sid, 550_000, 0.9)
+    assert kind(said(run(h, "PostToolUse", sid, tr, env=env))) == "PROACTIVE HANDOFF"
+    for trigger in ("manual", "auto"):
+        r = run_proc(h, "PreCompact", sid, tr, {"trigger": trigger, "custom_instructions": None}, env)
+        assert r.returncode == 0 and r.stdout.strip() == "", r
+    assert os.path.exists(compact_handoff(h, sid))
+    log = os.path.join(h, ".claude", "squad", "switches.log")
+    for _ in range(16):                    # a switch runs detached and waits 3 s before its first step
+        assert not os.path.exists(log) and not os.path.exists(sent), "PreCompact launched the switch"
+        time.sleep(0.5)
+    assert not state(h, sid).get("switched")
+
+
+def test_compaction_handler_error_fails_open_and_is_logged():
+    h = home()
+    sid = "c0c0c0c0-0004"
+    os.makedirs(os.path.join(h, ".claude", "squad", "watch"))
+    with open(os.path.join(h, ".claude", "squad", "watch", f"{sid}.main.json"), "w") as fh:
+        json.dump({"ctx": "not a number"}, fh)            # a corrupt state makes the handoff raise
+    r = run_proc(h, "PreCompact", sid, os.path.join(h, "t.jsonl"), {"trigger": "auto", "custom_instructions": None})
+    assert r.returncode == 0 and r.stdout.strip() == "" and r.stderr.strip() == "", r
+    with open(os.path.join(h, ".claude", "squad", "watch-errors.log")) as fh:
+        assert "TypeError" in fh.read()
+
+
+def test_compaction_handoff_off_with_squad_watch_0():
+    h = home()
+    sid = "c0c0c0c0-0005"
+    r = run_proc(h, "PreCompact", sid, session(h, sid, 300_000, 0.9),
+                 {"trigger": "manual", "custom_instructions": None}, {"SQUAD_WATCH": "0"})
+    assert r.returncode == 0 and r.stdout.strip() == "", r
+    assert not os.path.exists(compact_handoff(h, sid))
 
 
 def repo_with_gh(h):

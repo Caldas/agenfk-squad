@@ -14,7 +14,7 @@ agenfk-squad/
 │   └── vendor/               third-party skills, Apache-2.0, unmodified
 ├── hooks/
 │   ├── squad-router.py       UserPromptSubmit: suggests the agent for the request
-│   ├── squad-watch.py        the watcher: five hook events
+│   ├── squad-watch.py        the watcher: six hook events
 │   ├── squad-switch.py       detached: clears the pane and calls the pickup
 │   └── squad-turn.py         the merge queue CLI (`squad-turn`)
 ├── flows/squad-delivery.json the AgenFK flow whose steps match the agents
@@ -90,6 +90,7 @@ stdin. The watcher is one script that looks at `hook_event_name` and branches.
 | `PostToolUse` | After any tool call | `squad-watch.py` | No. Adds context: warnings, `PROACTIVE HANDOFF` |
 | `SubagentStop` | A sub-session ends | `squad-watch.py` | No. Records metrics, leaves a note for the parent |
 | `Stop` | The main session ends its turn | `squad-watch.py` | Yes. Returns `decision: block` when a handoff is owed |
+| `PreCompact` | Before `/compact` or an auto-compact | `squad-watch.py` | No. Writes `<session>-compact.md` in the main session; prints nothing |
 
 The router is separate on purpose: it is seventy lines of regular expressions
 with no state, and it should keep working if the watcher is switched off.

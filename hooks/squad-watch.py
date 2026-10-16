@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Squad sentinel: watches every Claude Code session and sub-session from the inside.
 
-Registered on PreToolUse, PostToolUse, SubagentStop and UserPromptSubmit
-(PostToolUseFailure, where the harness has it, only gives a merge turn back).
+Registered on PreToolUse, PostToolUse, SubagentStop, Stop, UserPromptSubmit and
+PreCompact (PostToolUseFailure, where the harness has it, only gives a merge turn
+back).
 
   PostToolUse       records the call; warns about loops; every CHECK_EVERY seconds
                     reads what was appended to the transcript and redoes the math
@@ -26,6 +27,11 @@ Registered on PreToolUse, PostToolUse, SubagentStop and UserPromptSubmit
                     squad-switch.py, which clears the herdr pane and calls the
                     pickup, so the session switch happens without the owner.
                     SQUAD_SWITCH=0 turns the switch off.
+  PreCompact        main session only, manual or auto: before the conversation is
+                    summarized, writes the same minimal handoff to
+                    ~/.claude/squad/handoffs/<session>-compact.md. Prints
+                    nothing, so it never blocks the compaction, and never
+                    switches the session.
 
 The stop is always soft: the watcher warns first (DISPATCH NOTICE), only the new
 dispatch is denied, the task in progress finishes, and it is the watcher that
@@ -1542,24 +1548,34 @@ def git_out(cwd, *args):
         return "UNKNOWN"
 
 
-def watch_handoff(p, st):
-    """The session was ordered to write the handoff and stopped without it: the
-    watcher takes over. Only what the watcher measures or kept goes in (git, the
-    owner's last request, the denied briefs); what was decided in the
+def watch_handoff(p, st, compact=None):
+    """The watcher writes the handoff the session did not: either the session was
+    ordered to write it and stopped without it (<session>-watch.md), or the
+    conversation is about to be compacted, `compact` being the trigger
+    (<session>-compact.md). Only what the watcher measures or kept goes in (git,
+    the owner's last request, the denied briefs); what was decided in the
     conversation stays UNKNOWN, in writing."""
     session, cwd = safe(p["session_id"]), str(p.get("cwd") or "")
     briefs = os.path.join(BASE, "handoffs", f"{session}-dispatches.md")
+    if compact:
+        why = (f"The conversation is about to be compacted ({compact}): what was decided in it is\n"
+               "about to be summarized away.")
+        asked = " ".join(str(p.get("custom_instructions") or "").split())[:500]
+        extra = f"- **Compact instructions:** {asked}\n" if asked else ""
+    else:
+        why = "The session received the handoff order and stopped without writing its own."
+        extra = ""
     body = f"""# Handoff written by squad-watch
 
-The session received the handoff order and stopped without writing its own. The
-watcher does not read the conversation: what was decided in it is UNKNOWN. What
-counts is what is below, the card and git.
+{why}
+The watcher does not read the conversation: what was decided in it is UNKNOWN.
+What counts is what is below, the card and git.
 
 - **When:** {time.strftime('%Y-%m-%dT%H:%M:%S%z')}
 - **Session:** {session} (context {k(st.get('ctx', 0))}, {st.get('blocked', 0)} dispatch(es) denied)
 - **Project:** {cwd or 'UNKNOWN'}
 - **Transcript:** {p.get('transcript_path') or 'UNKNOWN'}
-
+{extra}
 ## Ground truth (commands run by the watcher)
 
 Branch: {git_out(cwd, 'branch', '--show-current')}
@@ -1586,7 +1602,7 @@ Branch: {git_out(cwd, 'branch', '--show-current')}
 3. With no briefs: continue the owner's last request from what git and the card show as done.
 4. If it is not possible to tell what remains, ask the owner before editing.
 """
-    path = os.path.join(BASE, "handoffs", f"{session}-watch.md")
+    path = os.path.join(BASE, "handoffs", f"{session}-{'compact' if compact else 'watch'}.md")
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         tmp = f"{path}.{os.getpid()}.tmp"
@@ -1662,6 +1678,17 @@ def stop(p):
                      start_new_session=True, close_fds=True)
 
 
+def precompact(p):
+    """A compaction (/compact or auto) is about to summarize the main session's
+    conversation: the watcher first writes the same minimal handoff it writes for
+    a session that stopped without one. It prints nothing, so it never blocks the
+    compaction, and it never switches the session."""
+    if p.get("agent_id"):
+        return
+    st = load(state_path(p["session_id"], ""))
+    watch_handoff(p, st, compact=safe(p.get("trigger")) or "UNKNOWN")
+
+
 def main():
     if os.environ.get("SQUAD_WATCH") == "0":
         return
@@ -1687,6 +1714,8 @@ def main():
         subagent_stop(p)
     elif event == "Stop":
         stop(p)
+    elif event == "PreCompact":
+        precompact(p)
     elif event == "UserPromptSubmit" and not p.get("agent_id"):
         prompt(p)
         emit(event, "\n".join(turn_notes(p["session_id"]) + pending(p["session_id"])))
