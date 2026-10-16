@@ -101,8 +101,11 @@ for hours.
       with the trunk checked out.
   where: a merge or push is checked in the directory it runs in, the cwd moved
       by each literal `cd` before it and by `git -C`. When that cannot be told
-      (a variable or quotes in the path, `cd -`, a subshell, pushd, GIT_DIR,
-      env -C, a missing directory) and the seal is on or unknown, it is denied.
+      (a variable or quotes in the path, `cd -`, a subshell, a cd that may not
+      run, as in `a && cd x;` or `cd x || y`, pushd, GIT_DIR, env -C, a missing
+      directory) and the seal is on or unknown, it is denied. A push counts then
+      only if it may send the current branch or names a trunk of the session's
+      repository; outside any repository, every push counts.
   sync with main is never denied.
   `squad-turn request [PR] | release | status`   record an intent (it blocks
       nobody), drop it, see who is merging and the intents
@@ -184,7 +187,8 @@ PR_MERGE = re.compile(r"\bgh(?:[ \t]+[^\s;&|]+)*?[ \t]+pr\s+merge\b((?:[ \t]+-[^
 API_MERGE = re.compile(r"/pulls/(\d+)/merge\b|\bmergePullRequest\b|(?:\bgh\s+api\b|api\.github\.com)[^;&|\n]*/merges\b")
 GIT_PUSH = re.compile(r"\bgit((?:[ \t]+-[Cc][ \t]+\S+|[ \t]+--?[A-Za-z][\w-]*(?:=\S+)?)*)[ \t]+push\b([^;&|\n]*)")
 # Where a merge or push runs: each `cd` before it moves the directory; these make it unknown.
-CD = re.compile(r"(?:^|[;&|(\n{\"'])[ \t]*cd(?=[\s;&|)\"']|$)([^;&|\n)]*)")
+CD = re.compile(r"(?:^|(?P<sep>&&|\|\||[;&|(\n{\"']|\b(?:then|else|do)\b))[ \t]*cd(?=[\s;&|)\"']|$)"
+                r"(?P<arg>[^;&|\n)]*)(?=(?P<next>&&|\|\||[;&|\n)])|$)")
 ELSEWHERE = re.compile(r"\bGIT_(?:DIR|WORK_TREE)=|--git-dir\b|--work-tree\b|\benv\b[^;&|\n]*[ \t]-C\b|\b(?:pushd|popd)\b")
 LITERAL_DIR = re.compile(r"[A-Za-z0-9._/~+,@%=-]+")
 TURN_CLI = re.compile(AT + r"(?:\S*/)?squad-turn(?:\.py)?\s+(request|release|status)\b(?:\s+#?(\d+))?")
@@ -791,7 +795,7 @@ def turn_kind(p):
                       run_dir(text, m.start(), cwd)))
     for m in GIT_PUSH.finditer(text):
         where = run_dir(text, m.start(), cwd, re.findall(r"-C[ \t]+(\S+)", m.group(1)))
-        src = push_source(m.group(2), where)
+        src = push_source(m.group(2), where, cwd)
         if src is not None:
             found.append(("push", src, where))
     found = list(dict.fromkeys(found))
@@ -828,6 +832,7 @@ def run_dir(text, end, cwd, dirs=()):
     """The directory the command ending at text[:end] runs in: the session's cwd,
     moved by each `cd` before it and then by each `git -C` (dirs). None when the
     watcher cannot tell: a variable or quotes in the path, `cd -`, a subshell,
+    a cd that may not run (after &&, ||, |, then, else, do; before ||, |, &),
     pushd/popd, GIT_DIR, --git-dir, env -C, a directory that does not exist."""
     before = text[:end]
     if ELSEWHERE.search(before):
@@ -836,7 +841,10 @@ def run_dir(text, end, cwd, dirs=()):
     if cds and re.search(r"[()]", before):
         return None               # a cd inside a subshell may not apply here
     where = cwd
-    for words in [m.group(1).split()[:1] or ["~"] for m in cds] + [[d] for d in dirs]:
+    for m in cds:                 # a cd that may not run, or not in this shell: `a && cd x`, `cd x || y`, `cd x |`
+        if m.group("sep") in ("&&", "||", "|", "then", "else", "do") or m.group("next") in ("||", "|", "&"):
+            return None
+    for words in [m.group("arg").split()[:1] or ["~"] for m in cds] + [[d] for d in dirs]:
         w = words[0]
         if w == "-" or not LITERAL_DIR.fullmatch(w):
             return None
@@ -847,20 +855,25 @@ def run_dir(text, end, cwd, dirs=()):
     return where if not (cds or dirs) or os.path.isdir(where) else None     # a failed cd: who knows
 
 
-def push_source(args, where):
+def push_source(args, where, cwd):
     """The local revision a `git push` run in `where` sends to the trunk (see
     trunks); None if it does not push to the trunk. Any word may be the refspec
     (in doubt, it is); `HEAD` alone is the current branch; --all and --mirror
     push the trunk too; with no refspec, the current branch is pushed, to the
     trunk if it is the trunk or if its push target is. `where` None: the watcher
-    cannot tell the repository, its trunk or its branch, so any push counts."""
-    if where is None:
+    cannot tell the repository nor its branch; the push counts when it may send
+    the current branch (no refspec, `HEAD`, `@`) or names a trunk of the session's
+    repository (`cwd`), main or master; outside any repository, every push counts."""
+    if where is None and (not cwd or git_rc(cwd, "rev-parse", "--git-dir")[0] != 0):
         return "HEAD"
-    trunk = trunks(where) if where else ["main", "master"]
+    base = where if where is not None else cwd
+    trunk = trunks(base) if base else ["main", "master"]
     words = args.split()
     if "--all" in words or "--mirror" in words:
         return trunk[0]
     refs = [w for w in words if not w.startswith("-")]
+    if where is None and (len(refs) <= 1 or any(r.lstrip("+") in ("HEAD", "@") for r in refs)):
+        return "HEAD"
     current = git_rc(where, "branch", "--show-current")[1] if where else ""
     for ref in refs:
         src, colon, dst = ref.lstrip("+").rpartition(":")

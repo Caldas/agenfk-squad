@@ -821,6 +821,64 @@ def test_turn_status_uses_squad_trunk_first():
     assert "feat x origin/release" in out, out
 
 
+def test_a_cd_that_may_not_run_leaves_the_directory_unknown():
+    """Round 3 review: `false && cd <repo>; git push ...` was checked in <repo>,
+    though the cd never ran and the push ran in the session's unsealed worktree."""
+    h = home()
+    repo, env, _ = beta_origin(h)
+    git(repo, "config", "squad.seal", "true")
+    sid = "adad1111-0001"
+    seal_head(h, repo)
+    wt = os.path.join(h, "wt-y")
+    git(repo, "worktree", "add", "-q", "-b", "other", wt, "origin/beta")
+    with open(os.path.join(wt, "a.txt"), "w") as fh:
+        fh.write("not reviewed\n")
+    git(wt, "commit", "-qam", "unsealed")
+    assert bash(h, "PreToolUse", sid, wt, f"cd {repo}; git push origin HEAD:beta", env) == "nothing"   # sealed there
+    bash(h, "PostToolUse", sid, wt, f"cd {repo}; git push origin HEAD:beta", env)
+    for cmd in (f"false && cd {repo}; git push origin HEAD:beta", f"[ -d /nada ] && cd {repo}; git push origin HEAD:beta",
+                f"cd {wt} || cd {repo}; git push origin HEAD:beta", f"cd {repo} | cat; git push origin HEAD:beta",
+                f"cd {repo} & git push origin HEAD:beta", f"if true; then cd {repo}; fi; git push origin HEAD:beta"):
+        out = bash(h, "PreToolUse", sid, wt, cmd, env)
+        assert "MERGE SEAL" in out and "literal path" in out, (cmd, out)
+
+
+def test_an_unknown_directory_counts_only_a_push_that_may_reach_the_trunk():
+    """Round 3 review: with the directory unknown, every push counted as a push to
+    the trunk, so `cd "$D" && git push -u origin feat/x` took the turn or was denied."""
+    h = home()
+    repo, env, _ = beta_origin(h)
+    sid = "adad2222-0001"
+    outside = os.path.join(h, "outside")
+    os.makedirs(outside)
+    for cmd in ('cd "$D" && git push -u origin feat/x', "cd /no/such/dir && git push origin feat/x:feat/x"):
+        assert bash(h, "PreToolUse", sid, repo, cmd, env) == "nothing", cmd
+        assert holder(h) is None, cmd
+        out = bash(h, "PreToolUse", sid, outside, cmd, env)      # outside a repository: no trunk to compare with
+        assert "MERGE SEAL" in out and "literal path" in out, (cmd, out)
+    git(repo, "config", "squad.seal", "true")
+    for cmd in ('cd "$D" && git push', 'cd "$D" && git push origin', 'cd "$D" && git push -u origin HEAD',
+                'cd "$D" && git push origin @', 'cd "$D" && git push origin HEAD:beta', 'cd "$D" && git push origin main'):
+        out = bash(h, "PreToolUse", sid, repo, cmd, env)
+        assert "MERGE SEAL" in out and "literal path" in out, (cmd, out)
+
+
+def test_turn_status_falls_back_to_master():
+    """With no origin/HEAD, no squad.trunk, no origin/main and gh silent, the trunk is master."""
+    h = home()
+    repo, env, _ = origin_repo(h)
+    git(repo, "push", "-q", "origin", "HEAD:master")
+    subprocess.run(["git", "--git-dir", os.path.join(h, "origin.git"), "symbolic-ref", "HEAD", "refs/heads/master"],
+                   check=True)
+    git(repo, "push", "-q", "origin", ":main")
+    git(repo, "fetch", "-q", "--prune", "origin")
+    subprocess.run(["git", "-C", repo, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD"], capture_output=True)
+    git(repo, "checkout", "-q", "-b", "feat", "origin/master")
+    out = subprocess.run([sys.executable, os.path.join(ROOT, "hooks", "squad-turn.py"), "status"], cwd=repo,
+                         capture_output=True, text=True, env=dict(os.environ, HOME=h, **env)).stdout
+    assert "feat x origin/master" in out, out
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):
