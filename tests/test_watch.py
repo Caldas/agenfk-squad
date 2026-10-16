@@ -741,6 +741,86 @@ def test_turn_status_compares_against_the_remote_default_branch():
     assert "feat x origin/beta" in out and "merges without conflict" in out, out
 
 
+def seal_head(h, repo):
+    """Records a SHIP seal of the repository's HEAD with squad-seal."""
+    sha = git(repo, "rev-parse", "HEAD")
+    ev = os.path.join(h, f"{sha}.md")
+    with open(ev, "w") as fh:
+        fh.write("SHIP\n")
+    e = {k: v for k, v in os.environ.items() if not k.startswith(("SQUAD_", "HERDR_"))}
+    r = subprocess.run([sys.executable, os.path.join(ROOT, "hooks", "squad-seal.py"), "record", "--card", "c-1",
+                        "--model", "m", "--verdict", "SHIP", "--evidence", ev], cwd=repo, capture_output=True,
+                       text=True, env=dict(e, HOME=h))
+    assert r.returncode == 0, r.stderr
+    return sha
+
+
+def test_push_of_head_from_the_trunk_is_a_push_to_the_trunk():
+    """Round 2 review: `git push origin HEAD` with the trunk checked out passed,
+    because `origin` counted as the refspec and the current branch was never read."""
+    h = home()
+    repo, env, _ = beta_origin(h)
+    sealed = {**env, "SQUAD_SEAL": "1"}
+    sid = "acac1111-0001"
+    for cmd in ("git push origin HEAD", "git push -u origin HEAD", "git push origin @", "git push origin feat"):
+        assert bash(h, "PreToolUse", sid, repo, cmd, sealed) == "nothing", cmd          # feat is not the trunk
+    out = bash(h, "PreToolUse", sid, repo, "git push --all origin", sealed)
+    assert "MERGE SEAL" in out and "push to the trunk" in out, out                     # --all pushes the trunk
+    git(repo, "checkout", "-q", "-B", "beta", "origin/beta")
+    for cmd in ("git push origin HEAD", "git push -u origin HEAD", "git push origin @"):
+        out = bash(h, "PreToolUse", sid, repo, cmd, sealed)
+        assert "MERGE SEAL" in out and "push to the trunk" in out, (cmd, out)
+    git(repo, "checkout", "-q", "-b", "master")                                        # no upstream, no push target
+    out = bash(h, "PreToolUse", sid, repo, "git push", sealed)
+    assert "MERGE SEAL" in out and "push to the trunk" in out, out                     # the current branch is master
+
+
+def test_merge_and_push_are_checked_where_the_command_runs():
+    """Round 2 review: from a cwd outside the repository, `cd <repo> && <merge>`
+    passed unchecked; `cd ../wt-x && git push origin HEAD:beta` checked the HEAD of
+    the session's cwd, sealed, instead of the unsealed HEAD of wt-x."""
+    h = home()
+    repo, env, prs = beta_origin(h)
+    git(repo, "config", "squad.seal", "true")
+    sid = "acac2222-0001"
+    outside = os.path.join(h, "outside")
+    os.makedirs(outside)
+    set_prs(prs, **{"5": ("feat", git(repo, "rev-parse", "HEAD"))})
+    for cmd in (f"cd {repo} && git push origin HEAD:beta", f"cd {repo} && {GM} 5", f"cd {repo}; {GM} 5"):
+        out = bash(h, "PreToolUse", sid, outside, cmd, env)
+        assert "MERGE SEAL" in out and "no seal for that SHA" in out, (cmd, out)
+    for cmd in ('git -C "$WT" push origin HEAD:beta', f'cd "$WT" && {GM} 5', f"cd - && {GM} 5",
+                f"(cd {repo} && true) && {GM} 5", f"GIT_DIR={repo}/.git git push origin HEAD:beta"):
+        out = bash(h, "PreToolUse", sid, outside, cmd, env)
+        assert "MERGE SEAL" in out and "literal path" in out, (cmd, out)
+        assert holder(h) is None, cmd
+    seal_head(h, repo)
+    wt = os.path.join(h, "wt-x")
+    git(repo, "worktree", "add", "-q", "-b", "other", wt, "origin/beta")
+    with open(os.path.join(wt, "a.txt"), "w") as fh:
+        fh.write("not reviewed\n")
+    git(wt, "commit", "-qam", "unsealed")
+    assert bash(h, "PreToolUse", sid, repo, "git push origin HEAD:beta", env) == "nothing"   # sealed here
+    bash(h, "PostToolUse", sid, repo, "git push origin HEAD:beta", env)
+    for cmd in ("cd ../wt-x && git push origin HEAD:beta", "git -C ../wt-x push origin HEAD:beta",
+                f"cd {wt} && git push origin HEAD:beta"):
+        out = bash(h, "PreToolUse", sid, repo, cmd, env)
+        assert "MERGE SEAL" in out and "no seal for that SHA" in out, (cmd, out)
+    out = bash(h, "PreToolUse", sid, repo, 'cd "$WT" && git push origin HEAD:beta', {**env, "SQUAD_SEAL": "0"})
+    assert out == "nothing", out                                                           # seal off: no denial
+
+
+def test_turn_status_uses_squad_trunk_first():
+    h = home()
+    repo, env, _ = beta_origin(h)
+    git(repo, "push", "-q", "origin", "origin/beta:refs/heads/release")
+    git(repo, "fetch", "-q", "origin")
+    git(repo, "config", "squad.trunk", "release")
+    out = subprocess.run([sys.executable, os.path.join(ROOT, "hooks", "squad-turn.py"), "status"], cwd=repo,
+                         capture_output=True, text=True, env=dict(os.environ, HOME=h, **env)).stdout
+    assert "feat x origin/release" in out, out
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

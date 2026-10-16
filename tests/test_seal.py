@@ -167,6 +167,11 @@ def test_record_refuses_evidence_that_is_not_the_report_of_head():
     for bad in (other, os.path.join(h, "0" * 40 + ".md"), os.path.join(h, "missing", os.path.basename(ev))):
         r = record(h, repo, bad)
         assert r.returncode == 1 and "report of this very commit" in r.stderr, (bad, r.stderr)
+    middle = os.path.join(h, os.path.basename(ev)[5:17] + ".md")
+    with open(middle, "w") as fh:
+        fh.write("SHIP\n")
+    r = record(h, repo, middle)
+    assert r.returncode == 1 and "report of this very commit" in r.stderr, r.stderr  # a prefix, not any 12 characters
     eleven = os.path.join(h, os.path.basename(ev)[:11] + ".md")
     os.rename(ev, eleven)
     r = record(h, repo, eleven)

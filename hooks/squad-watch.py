@@ -97,7 +97,12 @@ for hours.
   trunk: main, master, the remote's default branch (origin/HEAD, or `gh repo
       view` when that ref is missing) and `git config squad.trunk` (a
       comma-separated list); a push whose destination, or whose push target with
-      no refspec, is one of them is a push to the trunk.
+      no refspec, is one of them is a push to the trunk; so is `push origin HEAD`
+      with the trunk checked out.
+  where: a merge or push is checked in the directory it runs in, the cwd moved
+      by each literal `cd` before it and by `git -C`. When that cannot be told
+      (a variable or quotes in the path, `cd -`, a subshell, pushd, GIT_DIR,
+      env -C, a missing directory) and the seal is on or unknown, it is denied.
   sync with main is never denied.
   `squad-turn request [PR] | release | status`   record an intent (it blocks
       nobody), drop it, see who is merging and the intents
@@ -178,6 +183,10 @@ AT = r"(?:^|[;&|(\n])\s*"                 # command position, for the squad-turn
 PR_MERGE = re.compile(r"\bgh(?:[ \t]+[^\s;&|]+)*?[ \t]+pr\s+merge\b((?:[ \t]+-[^\s;&|]+)*[ \t]+(?:#?(\d+)\b|\S*/pull/(\d+)))?")
 API_MERGE = re.compile(r"/pulls/(\d+)/merge\b|\bmergePullRequest\b|(?:\bgh\s+api\b|api\.github\.com)[^;&|\n]*/merges\b")
 GIT_PUSH = re.compile(r"\bgit((?:[ \t]+-[Cc][ \t]+\S+|[ \t]+--?[A-Za-z][\w-]*(?:=\S+)?)*)[ \t]+push\b([^;&|\n]*)")
+# Where a merge or push runs: each `cd` before it moves the directory; these make it unknown.
+CD = re.compile(r"(?:^|[;&|(\n{\"'])[ \t]*cd(?=[\s;&|)\"']|$)([^;&|\n)]*)")
+ELSEWHERE = re.compile(r"\bGIT_(?:DIR|WORK_TREE)=|--git-dir\b|--work-tree\b|\benv\b[^;&|\n]*[ \t]-C\b|\b(?:pushd|popd)\b")
+LITERAL_DIR = re.compile(r"[A-Za-z0-9._/~+,@%=-]+")
 TURN_CLI = re.compile(AT + r"(?:\S*/)?squad-turn(?:\.py)?\s+(request|release|status)\b(?:\s+#?(\d+))?")
 # What merge_text() may treat as data. Anything else on the line, or any doubt, counts as code.
 OPAQUE = re.compile(r"\$[({'\[]|`|[<>]\(|<<")      # substitutions, ANSI-C quotes, heredocs
@@ -752,19 +761,22 @@ def merge_targets(cmd):
 
 def turn_kind(p):
     """What the call has to do with the merge turn: (cli, verb, pr) | (merge,
-    shown, target) | (push, source, dir) | (many, what) when one call names more
-    than one merge. target is (PR, repo) for gh pr view, or None when the watcher
-    cannot tell which PR the call merges; shown is only for naming it."""
+    shown, target, dir) | (push, source, dir) | (many, what) when one call names
+    more than one merge. target is (PR, repo) for gh pr view, or None when the
+    watcher cannot tell which PR the call merges; shown is only for naming it;
+    dir is where the call runs (see run_dir), None when the watcher cannot tell."""
     tool = str(p.get("tool_name") or "")
     inp = p.get("tool_input") or {}
     if tool.endswith("merge_pull_request"):
         n = str(inp.get("pullNumber") or inp.get("pull_number") or "")
         repo = f"{inp.get('owner') or ''}/{inp.get('repo') or ''}"
         repo = repo if GH_REPO.fullmatch(repo) else ""
-        return ("merge", n, (n, repo) if n.isdigit() and (repo or not inp.get("repo")) else None)
+        return ("merge", n, (n, repo) if n.isdigit() and (repo or not inp.get("repo")) else None,
+                str(p.get("cwd") or ""))
     if tool != "Bash":
         return None
     cmd = str(inp.get("command") or "")
+    cwd = str(p.get("cwd") or "")
     text = merge_text(cmd)
     found = []
     merges = list(PR_MERGE.finditer(text))
@@ -773,14 +785,15 @@ def turn_kind(p):
         # the regex finds the merge anywhere (bash -c, ssh, xargs...); which PR it merges is read
         # only from a plain `gh pr merge` command, and only when every merge found is one
         target = targets[i] if targets is not None and len(targets) == len(merges) else None
-        found.append(("merge", m.group(2) or m.group(3) or "", target))
+        found.append(("merge", m.group(2) or m.group(3) or "", target, run_dir(text, m.start(), cwd)))
     for m in API_MERGE.finditer(text):
-        found.append(("merge", m.group(1) or "", (m.group(1), "") if m.group(1) else None))
+        found.append(("merge", m.group(1) or "", (m.group(1), "") if m.group(1) else None,
+                      run_dir(text, m.start(), cwd)))
     for m in GIT_PUSH.finditer(text):
-        src = push_source(m.group(2), str(p.get("cwd") or ""), m.group(1))
+        where = run_dir(text, m.start(), cwd, re.findall(r"-C[ \t]+(\S+)", m.group(1)))
+        src = push_source(m.group(2), where)
         if src is not None:
-            d = re.search(r"-C[ \t]+(\S+)", m.group(1))
-            found.append(("push", src, d.group(1) if d else ""))
+            found.append(("push", src, where))
     found = list(dict.fromkeys(found))
     if len(found) > 1:
         return ("many", ", ".join(f"PR #{f[1]}" if f[0] == "merge" and f[1] else
@@ -811,26 +824,53 @@ def trunks(cwd):
     return [n for n in dict.fromkeys(names) if BRANCH.fullmatch(n) and not n.startswith("-")]
 
 
-def push_source(args, cwd, opts=""):
-    """The local revision a `git push` sends to the trunk (see trunks); None if
-    it does not push to the trunk. Any word may be the refspec (in doubt, it is);
-    --all and --mirror push the trunk too; with no refspec, the current branch is
-    pushed, to the trunk if it is the trunk or if its push target is."""
-    d = re.search(r"-C[ \t]+(\S+)", opts)
-    where = os.path.join(cwd, d.group(1)) if d else cwd
+def run_dir(text, end, cwd, dirs=()):
+    """The directory the command ending at text[:end] runs in: the session's cwd,
+    moved by each `cd` before it and then by each `git -C` (dirs). None when the
+    watcher cannot tell: a variable or quotes in the path, `cd -`, a subshell,
+    pushd/popd, GIT_DIR, --git-dir, env -C, a directory that does not exist."""
+    before = text[:end]
+    if ELSEWHERE.search(before):
+        return None
+    cds = list(CD.finditer(before))
+    if cds and re.search(r"[()]", before):
+        return None               # a cd inside a subshell may not apply here
+    where = cwd
+    for words in [m.group(1).split()[:1] or ["~"] for m in cds] + [[d] for d in dirs]:
+        w = words[0]
+        if w == "-" or not LITERAL_DIR.fullmatch(w):
+            return None
+        w = os.path.expanduser(w)
+        if not os.path.isabs(w) and not where:
+            return None
+        where = os.path.normpath(os.path.join(where, w))
+    return where if not (cds or dirs) or os.path.isdir(where) else None     # a failed cd: who knows
+
+
+def push_source(args, where):
+    """The local revision a `git push` run in `where` sends to the trunk (see
+    trunks); None if it does not push to the trunk. Any word may be the refspec
+    (in doubt, it is); `HEAD` alone is the current branch; --all and --mirror
+    push the trunk too; with no refspec, the current branch is pushed, to the
+    trunk if it is the trunk or if its push target is. `where` None: the watcher
+    cannot tell the repository, its trunk or its branch, so any push counts."""
+    if where is None:
+        return "HEAD"
     trunk = trunks(where) if where else ["main", "master"]
     words = args.split()
     if "--all" in words or "--mirror" in words:
         return trunk[0]
     refs = [w for w in words if not w.startswith("-")]
+    current = git_rc(where, "branch", "--show-current")[1] if where else ""
     for ref in refs:
         src, colon, dst = ref.lstrip("+").rpartition(":")
+        if not colon and dst in ("HEAD", "@"):
+            dst, src = current, "HEAD"
         if dst.removeprefix("refs/heads/") in trunk:
-            return src if colon else dst
+            return src if colon or src == "HEAD" else dst
     if len(refs) <= 1 and where:
         target = git_rc(where, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{push}")[1]
-        if (git_rc(where, "branch", "--show-current")[1] in trunk
-                or target.partition("/")[2] in trunk):
+        if current in trunk or target.partition("/")[2] in trunk:
             return "HEAD"
     return None
 
@@ -1058,7 +1098,7 @@ def merge_gate(kind, cwd, repo, info):
             return ""             # a push to the trunk is fast-forward only: git itself refuses a conflict
         src = kind[1]
         sha = git_rc(cwd, "rev-parse", "--verify", "-q", f"{src}^{{commit}}")[1] if (
-            src and BRANCH.fullmatch(src) and not src.startswith("-")) else ""     # cwd is already the -C dir
+            src and BRANCH.fullmatch(src) and not src.startswith("-")) else ""     # cwd is already where it runs
         branch = git_rc(cwd, "branch", "--show-current")[1]
         return seal_denial(repo, sha if SHA.fullmatch(sha) else "", f"the push to the trunk ({src or '?'})", branch)
     if sealed and kind[2] is None:
@@ -1086,8 +1126,17 @@ def turn_pre(p):
     if not kind or os.environ.get("SQUAD_TURN") == "0":
         return False
     cwd = str(p.get("cwd") or "")
-    if kind[0] == "push" and kind[2]:
-        cwd = os.path.join(cwd, kind[2])                   # `git -C <dir> push`: the repository is that one
+    if kind[0] in ("merge", "push"):
+        if kind[-1] is None:      # a cd or -C the watcher cannot follow: the seal may be on over there
+            if os.environ.get("SQUAD_SEAL") != "0" and (not git_dir(cwd) or seal_on(cwd)):
+                deny("[squad-watch] MERGE SEAL: the watcher cannot tell which repository this "
+                     f"{'push' if kind[0] == 'push' else 'merge'} runs in (a cd or -C to a variable or a quoted "
+                     "path, `cd -`, a subshell, pushd, GIT_DIR or env -C before it), so the seal there cannot be "
+                     "checked. Run it with a literal path: `cd /path/to/worktree && gh pr merge <number>`, or "
+                     "`git -C /path/to/worktree push ...`. " + SEAL_HOW)
+                return True
+        else:
+            cwd = kind[-1]        # `cd <dir> &&` or `git -C <dir> push`: the repository is that one
     repo = git_dir(cwd)
     if not repo:
         if kind[0] in ("merge", "push", "many") and os.environ.get("SQUAD_SEAL") == "1":
