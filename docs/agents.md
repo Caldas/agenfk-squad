@@ -243,3 +243,9 @@ deliberate: a role enters after it has been needed in two projects, and one
 that has not been dispatched in thirty days is a candidate for removal.
 Every agent's description competes with all the others for the model's
 attention, so each addition makes the rest slightly harder to pick correctly.
+
+Every agent file in the squad follows the same layout: `Authority`,
+`Trigger`, `Approval gate`, `Escalation`, `Steps` and `Never`, in that order,
+so that what an agent may do, when it runs, what waits for approval and when
+it stops is in the same place in every file. `tests/test_agents.py` checks
+it.
