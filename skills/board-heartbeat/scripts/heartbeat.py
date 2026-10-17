@@ -6,7 +6,10 @@
 
 Five checks, read-only. Each finding is ONE line: the check, the subject, what
 is stuck, and "Next:" with who acts and the command. With nothing stuck it
-prints nothing and exits 0, so a scheduled run stays silent.
+prints nothing and exits 0, so a scheduled run stays silent. Names read from
+the board, GitHub or disk are stripped of control characters and JSON-quoted
+when not plain; titles are not printed; a "Next:" command holds only values
+this script validated (an integer PR number, a hex card id, a path that exists).
 
     stale-card     cards in a working step of the AgenFK board (`agenfk list --all
                    --active --json`, TODO left out) with no change for > --card-days;
@@ -35,10 +38,13 @@ import datetime
 import glob
 import json
 import os
+import re
+import shlex
 import shutil
 import subprocess
 import sys
 import time
+import unicodedata
 
 HOME = os.path.expanduser("~")
 TURN = os.path.join(HOME, ".claude", "squad", "turn")          # same directory as hooks/squad-watch.py
@@ -59,9 +65,71 @@ def short(path):
     return "~" + path[len(HOME):] if HOME and HOME != "/" and (path == HOME or path.startswith(HOME + os.sep)) else path
 
 
-def one_line(text, width=60):
-    text = " ".join(str(text or "").split())
+# ---- untrusted text ---------------------------------------------------------
+# A model session reads these lines. PR titles (anyone can open a PR on a public
+# repo), card titles, file names, paths and repo names are not ours: a "\n",
+# "\r" or "\x1b" in one would forge a line or an action. Every interpolated field
+# goes through clean(); a name that is not plain goes out JSON-quoted (data, not
+# words of the line); a "Next:" command carries only values validated here.
+# Titles are left out altogether: quoting stops a forged line, not a sentence
+# addressed to the model, and the id in the command is enough to find the item.
+
+SAFE = re.compile(r"[\w.@+/~-]+", re.ASCII)
+PATH_OK = re.compile(r"[\w.@+/~ ,=-]+")
+CARD_ID = re.compile(r"[0-9a-fA-F]{8}(?:-?[0-9a-fA-F]{4}){3}-?[0-9a-fA-F]{12}|[0-9a-fA-F]{8,40}")
+SESSION_ID = re.compile(r"[0-9A-Za-z_-]{1,64}")
+STATUS = re.compile(r"[A-Z_]{1,24}")
+
+
+def clean(text, width=60):
+    """One printable line, at most `width` long: control and non-printing characters
+    (Unicode C*: \\n \\r \\t \\x1b, bidi overrides, ...) and line/paragraph separators
+    become spaces, runs of space collapse to one."""
+    text = "".join(" " if unicodedata.category(ch)[0] == "C" or unicodedata.category(ch) in ("Zl", "Zp") else ch
+                   for ch in str("" if text is None else text))
+    text = " ".join(text.split())
     return text if len(text) <= width else text[:width - 1] + "…"
+
+
+def label(text, width=40):
+    """A name for the subject of a line: bare when it is plain, JSON-quoted otherwise."""
+    text = clean(text, width)
+    return text if SAFE.fullmatch(text) else json.dumps(text, ensure_ascii=False)
+
+
+def quoted(text, width=80):
+    """Free text (an error message) as a JSON string: always data."""
+    return json.dumps(clean(text, width), ensure_ascii=False)
+
+
+def pr_number(value):
+    """A PR number as an int, or None: an int (not a bool) or a string of digits."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, str) and value.isascii() and value.isdigit() and len(value) <= 9:
+        return int(value) or None
+    return None
+
+
+def card_id(value):
+    """The first 8 characters of a hex/uuid card id, or None."""
+    value = value if isinstance(value, str) else ""
+    return value[:8].lower() if CARD_ID.fullmatch(value) else None
+
+
+def shell_path(path):
+    """A path fit for a command: it exists, holds only letters, digits, space and
+    `._@+/~,=-` (no `;`, `:`, quotes, `$`, control characters), and is shell-quoted
+    (`~/` kept outside the quotes so the shell still expands it). None otherwise."""
+    path = str(path or "")
+    if not path or not PATH_OK.fullmatch(path) or not os.path.exists(path):
+        return None
+    shown = short(path)
+    if shown.startswith("~/"):
+        return "~/" + shlex.quote(shown[2:])
+    return "~" if shown == "~" else shlex.quote(shown)
 
 
 def ago(seconds):
@@ -121,25 +189,29 @@ def check_cards(projects, days, now):
     rc, out, err = run(["agenfk", "list", "--all", "--active", "--json"])
     items = load_json(out) if rc == 0 else None
     if not isinstance(items, list):
-        why = f"exit {rc}" + (f": {one_line(err)}" if err else "") if rc else "the output is not a JSON list"
+        why = f"exit {rc}" + (f": {quoted(err)}" if err else "") if rc else "the output is not a JSON list"
         return [f"skipped stale-card: `agenfk list --all --active --json` failed ({why}). "
                 "Next: owner checks the board server: agenfk health"]
-    names = {p.get("id"): p.get("name") for p in projects if isinstance(p, dict)}
+    names = {str(p.get("id")): p.get("name") for p in projects if isinstance(p, dict)}
     stale = {}
     for it in items:
         if not isinstance(it, dict) or str(it.get("status", "")).upper() in NOT_WORKING:
             continue
         t = when(it.get("updatedAt") or it.get("createdAt"))
         if t is not None and now - t > days * DAY:
-            stale.setdefault(it.get("projectId") or "", []).append((t, it))
+            stale.setdefault(str(it.get("projectId") or ""), []).append((t, it))
     lines = []
     for pid, found in sorted(stale.items(), key=lambda kv: str(names.get(kv[0]) or kv[0])):
         t, old = min(found, key=lambda f: f[0])
-        cid = str(old.get("id") or "")[:8]
-        name = names.get(pid) or f"project {str(pid)[:8]}"
-        lines.append(f"stale-card {one_line(name, 40)}: {len(found)} card(s) in a working step with no change for "
-                     f"> {days}d, oldest {cid} ({old.get('status')}, {ago(now - t)}) \"{one_line(old.get('title'))}\". "
-                     f"Next: main session resumes or parks it: agenfk get {cid}")
+        cid = card_id(old.get("id"))
+        status = str(old.get("status") or "").upper()
+        status = status if STATUS.fullmatch(status) else "?"
+        name = label(names.get(pid)) if names.get(pid) else "project " + (label(pid[:8]) if pid else "?")
+        oldest = f"oldest {cid} ({status}, {ago(now - t)})" if cid else f"oldest ({status}, {ago(now - t)})"
+        nxt = (f"Next: main session resumes or parks it: agenfk get {cid}" if cid else
+               "Next: main session reads the board: agenfk list --all --active")
+        lines.append(f"stale-card {name}: {len(found)} card(s) in a working step with no change for "
+                     f"> {days}d, {oldest}. {nxt}")
     return lines
 
 
@@ -162,9 +234,9 @@ def check_prs(repos, hours, now):
                             "--json", "number,title,isDraft,createdAt,latestReviews"], cwd=r["top"])
         prs = load_json(out) if rc == 0 else None
         if not isinstance(prs, list):
-            why = f"exit {rc}" + (f": {one_line(err)}" if err else "") if rc else "the output is not a JSON list"
-            lines.append(f"skipped pr-no-review {r['name']}: `gh pr list` failed ({why}). Next: owner checks the "
-                         "login: gh auth status")
+            why = f"exit {rc}" + (f": {quoted(err)}" if err else "") if rc else "the output is not a JSON list"
+            lines.append(f"skipped pr-no-review {label(r['name'])}: `gh pr list` failed ({why}). Next: owner "
+                         "checks the login: gh auth status")
             continue
         waiting = []
         for p in prs:
@@ -175,9 +247,12 @@ def check_prs(repos, hours, now):
                 waiting.append((t, p))
         if waiting:
             t, old = min(waiting, key=lambda w: w[0])
-            lines.append(f"pr-no-review {r['name']}: {len(waiting)} open PR(s) with no review for > {hours}h, "
-                         f"oldest #{old.get('number')} ({ago(now - t)}) \"{one_line(old.get('title'))}\". "
-                         f"Next: main session dispatches the verifier on it: gh pr view {old.get('number')}")
+            num = pr_number(old.get("number"))
+            oldest = f"oldest #{num} ({ago(now - t)})" if num else f"oldest ({ago(now - t)})"
+            nxt = (f"Next: main session dispatches the verifier on it: gh pr view {num}" if num else
+                   "Next: main session dispatches the verifier on them: gh pr list --state open")
+            lines.append(f"pr-no-review {label(r['name'])}: {len(waiting)} open PR(s) with no review for > {hours}h, "
+                         f"{oldest}. {nxt}")
     return lines
 
 
@@ -194,16 +269,19 @@ def check_turn(turn_max, now):
         if not isinstance(d, dict):
             continue
         repo = str(d.get("repo") or "")
-        name = repo_name(repo) if repo else os.path.basename(path)
-        holder, queue = d.get("holder"), [e for e in (d.get("queue") or []) if isinstance(e, dict)]
+        name = label(repo_name(repo) if repo else os.path.basename(path))
+        queue = d.get("queue") if isinstance(d.get("queue"), list) else []
+        holder, queue = d.get("holder"), [e for e in queue if isinstance(e, dict)]
         waiting = f", {len(queue)} waiting" if queue else ""
-        settle = (f"Next: any session in {name} runs squad-turn status (the watcher settles a stale turn), "
-                  "or the holder gives it back: squad-turn release")
+        settle = ("Next: any session in that repository runs squad-turn status (the watcher settles a stale "
+                  "turn), or the holder gives it back: squad-turn release")
         if isinstance(holder, dict):
             since = holder.get("since")
             if isinstance(since, (int, float)) and now - since > turn_max:
-                who = f"session {str(holder.get('session') or '?')[:8]}" + (
-                    f" (PR #{holder['pr']})" if holder.get("pr") else "")
+                session = holder.get("session")
+                session = session[:8] if isinstance(session, str) and SESSION_ID.fullmatch(session[:8]) else "?"
+                num = pr_number(holder.get("pr"))
+                who = f"session {session}" + (f" (PR #{num})" if num else "")
                 lines.append(f"merge-turn {name}: {who} has held the merge turn for {ago(now - since)} "
                              f"(max {ago(turn_max)}){waiting}. {settle}")
         elif queue:
@@ -279,15 +357,19 @@ def check_worktrees(repos, days, now):
         if not idle and not missing:
             continue
         parts, nxt = [], []
+        top = shell_path(r["top"])
+        listing = f"git -C {top} worktree list" if top else "git worktree list in that repository"
         if idle:
             t, path = min(idle)
+            where = shell_path(path)
             parts.append(f"{len(idle)} worktree(s) with no commit, checkout or claim for > {days}d, "
-                         f"oldest {short(path)} ({ago(now - t)})")
-            nxt.append(f"github agent confirms the branch is merged or parked, then git worktree remove {short(path)}")
+                         f"oldest {where or label(short(path), 80)} ({ago(now - t)})")
+            nxt.append(f"github agent confirms the branch is merged or parked, then git worktree remove {where}"
+                       if where else f"github agent confirms each branch is merged or parked: {listing}")
         if missing:
             parts.append(f"{missing} registered but missing on disk")
-            nxt.append(f"git -C {short(r['top'])} worktree prune")
-        lines.append(f"idle-worktree {r['name']}: " + "; ".join(parts) + ". Next: " + "; ".join(nxt))
+            nxt.append(f"git -C {top} worktree prune" if top else f"github agent checks: {listing}")
+        lines.append(f"idle-worktree {label(r['name'])}: " + "; ".join(parts) + ". Next: " + "; ".join(nxt))
     return lines
 
 
@@ -306,9 +388,11 @@ def check_handoffs(dirs, days, now):
                 old.append((t, path))
         if old:
             t, path = min(old)
-            lines.append(f"old-handoff {short(d)}: {len(old)} handoff(s) older than {days}d, oldest "
-                         f"{os.path.basename(path)} ({ago(now - t)}). Next: context agent picks up what is still "
-                         f"open and archives the rest: ls -t {short(d)}")
+            where = shell_path(d)
+            nxt = (f"Next: context agent picks up what is still open and archives the rest: ls -t {where}" if where
+                   else "Next: context agent picks up what is still open in that directory and archives the rest")
+            lines.append(f"old-handoff {label(short(d), 80)}: {len(old)} handoff(s) older than {days}d, oldest "
+                         f"{label(os.path.basename(path), 60)} ({ago(now - t)}). {nxt}")
     return lines
 
 
