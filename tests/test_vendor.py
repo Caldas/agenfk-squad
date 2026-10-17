@@ -239,6 +239,20 @@ def test_install_refuses_a_source_that_resolves_outside_the_repo():
         assert os.path.islink(os.path.join(cfg, *rest)), rest            # the rest is still linked
 
 
+def test_install_refuses_a_sibling_that_shares_the_repo_prefix():
+    repo = repo_copy()
+    sibling = repo + "-evil"                                           # <repo>-evil starts with <repo>
+    os.makedirs(sibling)
+    with open(os.path.join(sibling, "SKILL.md"), "w") as fh:
+        fh.write("---\nname: evil\ndescription: x\n---\n")
+    os.symlink(sibling, os.path.join(repo, "skills", "evil"))
+    r, cfg = install(repo)
+    assert r.returncode != 0, r.stdout + r.stderr
+    assert any(line.startswith("REFUSED") and os.path.realpath(sibling) in line
+               for line in r.stderr.splitlines()), r.stderr
+    assert not os.path.lexists(os.path.join(cfg, "skills", "evil"))
+
+
 def test_install_links_a_clean_copy_and_exits_zero():
     repo = repo_copy()
     r, cfg = install(repo)
