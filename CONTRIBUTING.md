@@ -65,6 +65,7 @@ CLAUDE_CONFIG_DIR=/tmp/claude-test HOME=/tmp/claude-test-home ./install.sh
 ```bash
 python3 tests/test_watch.py
 python3 tests/test_vendor.py
+python3 tests/test_agents.py
 python3 -m py_compile hooks/*.py skills/session-context/scripts/session_context.py
 bash -n install.sh
 ```
@@ -74,8 +75,9 @@ transcript and a temporary state directory, feeds hook payloads to the real
 scripts as subprocesses, and asserts on what they print. It prints `ok` per
 test and exits non-zero on the first failure. `test_vendor.py` checks
 `skills/vendor/` against its `LOCK` and runs `install.sh` on a temporary copy
-of the repository. CI runs the same commands, plus a grep for private home paths,
-on Python 3.10, 3.12 and 3.14.
+of the repository. `test_agents.py` checks that every file in `agents/` has
+the six standing-order sections, in order. CI runs the same commands, plus a
+grep for private home paths, on Python 3.10, 3.12 and 3.14.
 
 ## Proposing a watcher rule
 
@@ -107,6 +109,13 @@ A new agent needs:
   must write, say exactly what.
 - A **description made of trigger phrases** a user would actually type.
 - **Explicit limits**: what it never does, and what it hands to which other agent.
+- The **six standing-order sections**, as level-2 headings in this order:
+  `Authority` (what it may do), `Trigger` (when it runs), `Approval gate`
+  (what waits for someone else's approval), `Escalation` (when it stops and
+  asks), `Steps` (how it works) and `Never` (what it never does). Other
+  sections, such as the return format and `Skills`, go between or after them.
+  `python3 tests/test_agents.py` fails, naming the file and the section, when
+  one is missing or out of order.
 - A **return format**: what it gives back to the main session, as evidence.
 - A row in `CLAUDE.md` ("Who does what"), in `README.md` and in `docs/agents.md`.
 - If it maps to a flow step, a line in `flows/squad-delivery.json` and
