@@ -22,9 +22,28 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Compile hooks and scripts
         run: python -m py_compile hooks/*.py skills/session-context/scripts/session_context.py
+      - name: Vendor lock and install guard
+        run: python tests/test_vendor.py
+      - name: Agent standing-order sections
+        run: python tests/test_agents.py
       - name: Check install.sh syntax
         run: bash -n install.sh
       - name: Watcher test suite
         run: python tests/test_watch.py
+      # Node is the same on every Python leg: run the helper tests once.
+      - uses: actions/setup-node@v4
+        if: matrix.python == '3.12'
+        with:
+          node-version: "22"
+      - name: ci-cost changed-ranges tests (floor 23)
+        if: matrix.python == '3.12'
+        run: |
+          set -euo pipefail
+          node --test --test-reporter=tap skills/ci-cost/scripts/changed-ranges.test.mjs | tee "$RUNNER_TEMP/ranges.tap"
+          passed=$(awk '/^# pass /{print $3}' "$RUNNER_TEMP/ranges.tap")
+          if [ -z "${passed:-}" ] || [ "$passed" -lt 23 ]; then
+            echo "::error::changed-ranges reported '${passed:-no}' passing tests; expected at least 23."
+            exit 1
+          fi
       - name: No private paths in the tree
         run: "! grep -rnE '/home/[a-z]+/' --exclude-dir=.git --exclude-dir=vendor ."
