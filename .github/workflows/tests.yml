@@ -30,6 +30,8 @@ jobs:
         run: bash -n install.sh
       - name: Watcher test suite
         run: python tests/test_watch.py
+      - name: Board heartbeat tests
+        run: python tests/test_heartbeat.py
       # Node is the same on every Python leg: run the helper tests once.
       - uses: actions/setup-node@v4
         if: matrix.python == '3.12'
