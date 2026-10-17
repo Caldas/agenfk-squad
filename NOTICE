@@ -1,9 +1,12 @@
 agenfk-squad
 Copyright (c) 2026 Eduardo José Pin
-Licensed under the ISC License (see LICENSE).
+Licensed under the Functional Source License, Version 1.1, ALv2 Future
+License (FSL-1.1-ALv2; see LICENSE). Releases up to and including v0.1.0
+were published under the ISC License and remain available under it.
+The name "agenfk-squad" is not licensed with the code; see TRADEMARKS.md.
 
 This repository redistributes third-party skills, unmodified, under
-skills/vendor/. They are NOT covered by the ISC license above:
+skills/vendor/. They are NOT covered by the license above:
 
   skills/vendor/algorithmic-art   Copyright Anthropic, PBC. Apache License 2.0.
   skills/vendor/canvas-design     Copyright Anthropic, PBC. Apache License 2.0.

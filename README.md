@@ -1,7 +1,7 @@
 # agenfk-squad
 
 [![tests](https://github.com/eduardopin/agenfk-squad/actions/workflows/tests.yml/badge.svg)](https://github.com/eduardopin/agenfk-squad/actions/workflows/tests.yml)
-[![license: ISC](https://img.shields.io/badge/license-ISC-blue.svg)](LICENSE)
+[![license: FSL-1.1-ALv2](https://img.shields.io/badge/license-FSL--1.1--ALv2-blue.svg)](LICENSE)
 
 **A squad of eleven Claude Code agents, and a watcher that keeps them honest, built on [AgenFK](https://github.com/cglab-public/agenfk).**
 
@@ -324,13 +324,23 @@ evidence from two projects. The full requirements are in
 **Safety and community:** follow the
 [Code of Conduct](CODE_OF_CONDUCT.md). Report vulnerabilities privately using
 [GitHub's vulnerability reporting](https://github.com/eduardopin/agenfk-squad/security/advisories/new),
-not public issues. By contributing, you agree to license your contribution
-under the project's [ISC license](LICENSE).
+not public issues. Every pull request must state that you agree to the
+[Contributor License Agreement](CLA.md).
 
 ## License and credits
 
-[ISC](LICENSE), the same license as AgenFK. Third-party skills under
-`skills/vendor/` keep their own license; see [NOTICE](NOTICE).
+[Functional Source License 1.1, ALv2 Future License](LICENSE) (FSL-1.1-ALv2).
+You may use, change and share the squad for anything except offering it, or
+something substantially similar, as a commercial product or service that
+competes with it. Two years after each version is published, that version
+also becomes available under the Apache License 2.0. Releases up to and
+including v0.1.0 remain under the ISC License.
+
+The name "agenfk-squad" is not licensed with the code: a fork you publish
+takes another name. See [TRADEMARKS.md](TRADEMARKS.md).
+
+Third-party skills under `skills/vendor/` keep their own license; see
+[NOTICE](NOTICE). AgenFK keeps its own ISC License.
 
 AgenFK is developed by [CG/lab](https://github.com/cglab-public/agenfk). This
 project is an independent companion to it, not part of it.

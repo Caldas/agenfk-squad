@@ -21,7 +21,8 @@ changes in the company's development environment.
 ### 1. Establish authority and isolate the work
 
 - Confirm the human operator is authorized by their organization to contribute
-  the proposed material under the repository's **ISC license**. Obtain explicit
+  the proposed material under the repository's **[Contributor License
+  Agreement](../CLA.md)** (the project is under the FSL-1.1-ALv2). Obtain explicit
   human approval **before publishing** code, logs, diffs, or other material.
   If authorization is unclear, stop before publication and describe the blocker.
 - Use only the GitHub identity and repositories the operator authorizes.
@@ -159,8 +160,9 @@ contribution is accepted or merged until verified.
   [GitHub security advisories](https://github.com/eduardopin/agenfk-squad/security/advisories/new).
 - Questions about the underlying AgenFK CLI, boards, flows or gates belong in
   the [AgenFK repository](https://github.com/cglab-public/agenfk).
-- Follow the [Code of Conduct](../CODE_OF_CONDUCT.md) and
-  [ISC license](../LICENSE).
+- Follow the [Code of Conduct](../CODE_OF_CONDUCT.md), the
+  [license](../LICENSE) and the [trademark policy](../TRADEMARKS.md), and
+  state agreement to the [CLA](../CLA.md) in each pull request.
 
 Contributions are welcome from individuals and organizations, but the
 contributing organization remains responsible for approving any publication

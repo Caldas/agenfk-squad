@@ -162,8 +162,13 @@ makes the agent rigid everywhere else. Explain the reason for the rule instead.
 - Fill in the template. The checklist is the review.
 - Commit messages in the imperative, with the reason in the body when it is
   not obvious.
-- By contributing you agree that your contribution is licensed under the
-  [ISC License](LICENSE).
+- Every pull request states, in its description, that you agree to the
+  [Contributor License Agreement](CLA.md): "I have read CLA.md and I agree
+  to it for this and my future contributions." Without that line it is not
+  merged. The project is under the [FSL-1.1-ALv2](LICENSE); the CLA lets the
+  maintainer keep licensing your contribution with the rest of the project.
+- Publishing a fork under the project's name is not allowed; see
+  [TRADEMARKS.md](TRADEMARKS.md).
 
 ## Where things are
 
