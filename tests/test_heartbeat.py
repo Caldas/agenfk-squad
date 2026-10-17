@@ -24,7 +24,11 @@ import tempfile
 import time
 import types
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Importing heartbeat.py by absolute path would leave a .pyc holding that path
+# in the tree, and CI's private-path grep matches it.
+sys.dont_write_bytecode = True
+
+ROOT =os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPT = os.path.join(ROOT, "skills", "board-heartbeat", "scripts", "heartbeat.py")
 DAY = 86400
 PROJECT = "11111111-2222-3333-4444-555555555555"
