@@ -1,0 +1,12 @@
+# Third-party skills vendored in this directory, pinned to where they came from.
+# tests/test_vendor.py fails when a directory here has no line, when a line has no
+# directory, or when a skill's content no longer matches its sha256.
+#
+# Fields: name, origin repository, path in that repository, upstream commit
+# (full 40 characters, or `unknown` when it cannot be confirmed; never guessed),
+# sha256 of the skill's files. The hash recipe is in tests/test_vendor.py and
+# CONTRIBUTING.md; print it with `python3 tests/test_vendor.py --hash skills/vendor/<name>`.
+#
+# name            origin                               path                   commit                                    sha256
+algorithmic-art   https://github.com/anthropics/skills skills/algorithmic-art b9e19e6f44773509fbdd7001d77ff41a49a486c1  4a85abfeaa09f2dd2c4b76c85d57b65f61dc10d55c3cca245989cee8897c2be5
+canvas-design     https://github.com/anthropics/skills skills/canvas-design   b9e19e6f44773509fbdd7001d77ff41a49a486c1  1866477474e694f562261008bb6a817e53f027b6347b062fbd1e2ee2eb83f20d

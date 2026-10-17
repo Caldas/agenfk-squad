@@ -134,6 +134,7 @@ design before it becomes code: cost, IAM, network, persistence, rollback.
   `[SUGGESTION]`, and what the owner must run.
 - **Never:** `apply`, `destroy` or deploy. A new cloud resource is priced by
   `finops` **before** `infra` writes it.
+- **Uses:** the `ci-cost` skill for workflow changes.
 
 ## tester
 
@@ -175,11 +176,14 @@ integration and security flaws.
 
 Prices the monthly cloud cost of a design line by line, each line with a
 source, a date and a formula, at the measured volume and at ten times it.
-Measures token spend per card, project and model from AgenFK.
+Measures token spend per card, project and model from AgenFK, and CI minutes
+per job and per PR branch.
 
 - **Dispatch when:** before any stack decision or new cloud resource; a
   document needs a cost table; closing an epic; "how much does this cost",
   "where can we cut".
+- **Uses:** the `ci-cost` skill to measure CI minutes (billing API plus a
+  per-job rounded minute).
 - **Never:** quotes a price without a dated source, or presents an assumption
   as a measurement.
 
@@ -239,3 +243,9 @@ deliberate: a role enters after it has been needed in two projects, and one
 that has not been dispatched in thirty days is a candidate for removal.
 Every agent's description competes with all the others for the model's
 attention, so each addition makes the rest slightly harder to pick correctly.
+
+Every agent file in the squad follows the same layout: `Authority`,
+`Trigger`, `Approval gate`, `Escalation`, `Steps` and `Never`, in that order,
+so that what an agent may do, when it runs, what waits for approval and when
+it stops is in the same place in every file. `tests/test_agents.py` checks
+it.

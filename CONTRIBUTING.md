@@ -64,6 +64,8 @@ CLAUDE_CONFIG_DIR=/tmp/claude-test HOME=/tmp/claude-test-home ./install.sh
 
 ```bash
 python3 tests/test_watch.py
+python3 tests/test_vendor.py
+python3 tests/test_agents.py
 python3 -m py_compile hooks/*.py skills/session-context/scripts/session_context.py
 bash -n install.sh
 ```
@@ -71,8 +73,11 @@ bash -n install.sh
 The suite has no dependencies and no test runner. Each test builds a fake
 transcript and a temporary state directory, feeds hook payloads to the real
 scripts as subprocesses, and asserts on what they print. It prints `ok` per
-test and exits non-zero on the first failure. CI runs the same three commands, plus a grep for private home paths,
-on Python 3.10, 3.12 and 3.14.
+test and exits non-zero on the first failure. `test_vendor.py` checks
+`skills/vendor/` against its `LOCK` and runs `install.sh` on a temporary copy
+of the repository. `test_agents.py` checks that every file in `agents/` has
+the six standing-order sections, in order. CI runs the same commands, plus a
+grep for private home paths, on Python 3.10, 3.12 and 3.14.
 
 ## Proposing a watcher rule
 
@@ -104,6 +109,13 @@ A new agent needs:
   must write, say exactly what.
 - A **description made of trigger phrases** a user would actually type.
 - **Explicit limits**: what it never does, and what it hands to which other agent.
+- The **six standing-order sections**, as level-2 headings in this order:
+  `Authority` (what it may do), `Trigger` (when it runs), `Approval gate`
+  (what waits for someone else's approval), `Escalation` (when it stops and
+  asks), `Steps` (how it works) and `Never` (what it never does). Other
+  sections, such as the return format and `Skills`, go between or after them.
+  `python3 tests/test_agents.py` fails, naming the file and the section, when
+  one is missing or out of order.
 - A **return format**: what it gives back to the main session, as evidence.
 - A row in `CLAUDE.md` ("Who does what"), in `README.md` and in `docs/agents.md`.
 - If it maps to a flow step, a line in `flows/squad-delivery.json` and
@@ -118,7 +130,19 @@ with `name` (equal to the directory) and `description` in the frontmatter.
   belongs in `references/` inside the skill, loaded only when needed.
 - Scripts go in `scripts/`, standard library only, with `--help`.
 - Third-party skills go under `skills/vendor/`, unmodified, with their
-  license file, and are listed in `NOTICE`.
+  license file, and are listed in `NOTICE`. They are copies: `install.sh`
+  refuses to link anything whose real path is outside the repository, so a
+  skill directory that is a symlink to elsewhere is not installed.
+- Each vendored skill needs a line in `skills/vendor/LOCK`: name, origin
+  repository URL, path in that repository, the full upstream commit (or
+  `unknown` when you cannot confirm it; never a guess) and the sha256 of its
+  files. `python3 tests/test_vendor.py --hash skills/vendor/<name>` prints the
+  sha256. The recipe, standard library `hashlib` only: collect every regular
+  file as a path relative to the skill directory with `/` separators, sort the
+  paths by their UTF-8 bytes, and feed sha256, for each one in order, with the
+  path, a NUL byte, the file size in decimal, a NUL byte and the file's bytes.
+  Symlinks inside a vendored skill fail the check. Updating a vendored skill
+  means changing its commit and sha256 in the same pull request.
 
 ## Improving an agent prompt
 

@@ -1,0 +1,21 @@
+{
+  "comment": "Which hook runs on which Claude Code event. The single source for scripts/squad_settings.py, which registers and removes these entries in settings.json. Events missing from 'matchers' get no matcher. A harness without an event ignores its entry.",
+  "matchers": {
+    "UserPromptSubmit": "*",
+    "PreToolUse": "*",
+    "PostToolUse": "*",
+    "PostToolUseFailure": "*"
+  },
+  "hooks": [
+    {
+      "script": "squad-router.py",
+      "timeout": 5,
+      "events": ["UserPromptSubmit"]
+    },
+    {
+      "script": "squad-watch.py",
+      "timeout": 10,
+      "events": ["UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "SubagentStop", "Stop"]
+    }
+  ]
+}
