@@ -13,6 +13,9 @@ skills/vendor/. They are NOT covered by the ISC license above:
                                   or per foundry family group.
 
 The full license text ships inside each directory (LICENSE.txt).
+Where each one came from (repository, path and upstream commit) and a sha256
+of its files are pinned in skills/vendor/LOCK; tests/test_vendor.py fails when
+a vendored copy drifts from it.
 
 agenfk-squad is built on AgenFK (https://github.com/cglab-public/agenfk),
 Copyright (c) 2026 CG/lab, ISC License. AgenFK is a separate project and is
