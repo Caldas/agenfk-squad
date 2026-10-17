@@ -75,7 +75,7 @@ dependencies.
 
 **Controls branches, worktrees, PRs and parallelism.**
 
-Maps who is where (Claude Code, Codex and pi sessions; AgenFK cards; open
+Maps who is where (Claude Code, Codex, pi and oh-my-pi sessions; AgenFK cards; open
 PRs), plans parallel fronts over disjoint files, opens the branch and worktree
 for each card, records the writer of each worktree, keeps the PR stack
 readable, proposes the merge train, and cleans up what died.

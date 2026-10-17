@@ -25,13 +25,19 @@ worktree where another live session has edited recently, deny the first edit
 and say which session holds the tree and how to get a worktree of its own.
 
 ### Other harnesses
-The agents are Markdown and the session report already reads Codex and pi
-transcripts. The hooks speak only Claude Code's hook protocol.
+The agents are Markdown and the session report already reads Codex, pi and
+oh-my-pi transcripts. The hooks speak only Claude Code's hook protocol.
 
-*Wanted:* the watcher's rules ported to Codex, pi, Gemini CLI or OpenCode. The
-arithmetic (`handoff_math`) is harness-neutral; the event plumbing is not. A
-port should say which rules the harness can enforce mechanically and which it
-can only advise.
+Oh-my-pi (omp) is ported: `skills/harness-port/SKILL.md` renders the agents
+into its task-agent contract, `hooks/squad-watch-omp.py` plus
+`extensions/squad-watch-omp.ts` route its events into the watcher, and the
+skill states which rules omp enforces mechanically and which it can only
+advise.
+
+*Wanted:* the same for Codex, pi, Gemini CLI or OpenCode. The arithmetic
+(`handoff_math`) is harness-neutral; the event plumbing is not. A port should
+say which rules the harness can enforce mechanically and which it can only
+advise.
 
 ### An observe-only mode
 There is no way to run the watcher so that it logs what it *would* have done

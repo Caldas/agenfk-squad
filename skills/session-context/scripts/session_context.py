@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Context indicators for the AI sessions on this machine: Claude Code, Codex and pi.
+"""Context indicators for the AI sessions on this machine: Claude Code, Codex, pi and oh-my-pi.
 
 Reads the transcripts (read-only, it never writes to them) and prints, per
 session: current context and % of the window, weighted burn, reread share,
@@ -61,7 +61,7 @@ BURN_FULL_PCT = env_num("SQUAD_BURN_FULL", 50, 1, 100)
 CTX_BASE = env_num("SQUAD_CTX_BASE", 40_000, 1_000, 500_000)  # context of a new session with the handoff already read
 HANDOFF_OUT = 2_000        # output tokens needed to write the handoff
 IDLE_MIN = 90             # minutes without activity = idle
-DEFAULT_WINDOW = {"claude": 1_000_000, "codex": 258_400, "pi": 128_000}
+DEFAULT_WINDOW = {"claude": 1_000_000, "codex": 258_400, "pi": 128_000, "omp": 262_144}
 # Known windows; when the transcript does not state the window, use the
 # smallest one that fits the largest context seen in the session (shown as
 # "inferred").
@@ -298,7 +298,20 @@ def codex_sessions(hours):
 
 
 # ---------------------------------------------------------------- pi
-def scan_pi(path, st):
+# The pi family (pi and the omp fork) shares the session JSONL. omp writes the
+# model as `model` where pi writes `modelId`, and the DGX checkpoint's window is
+# larger than the generic inference would guess from a young session.
+_PI_FAMILY_WINDOWS = {"glm-5.3-flash-exl3": 262_144}   # DGX Spark checkpoint
+
+
+def pi_family_window(model):
+    """The window of a pi/omp model when it is known, else 0 (infer it)."""
+    if not model:
+        return 0
+    return _PI_FAMILY_WINDOWS.get(str(model).split("/")[-1].lower(), 0)
+
+
+def _scan_pi_family(path, st, model_keys):
     for d in jsonl(path):
         t = d.get("type")
         ts = d.get("timestamp")
@@ -308,7 +321,9 @@ def scan_pi(path, st):
         if t == "session":
             st["cwd"] = d.get("cwd") or st["cwd"]
         elif t == "model_change":
-            st["model"] = d.get("modelId") or st["model"]
+            model = next((d.get(k) for k in model_keys if d.get(k)), None)
+            st["model"] = model or st["model"]
+            st["window"] = pi_family_window(model) or st["window"]
         elif t == "message":
             m = d.get("message") or {}
             role = m.get("role")
@@ -338,6 +353,23 @@ def scan_pi(path, st):
                             st["reads"][fp] += 1
 
 
+def scan_pi(path, st):
+    _scan_pi_family(path, st, ("modelId", "model"))
+
+
+def scan_omp(path, st):
+    _scan_pi_family(path, st, ("model", "modelId"))
+
+
+# One dialect per harness; the path or the payload says which. Default claude so
+# an unknown payload keeps the behaviour it always had.
+SCANNERS = {"claude": scan_claude, "codex": scan_codex, "pi": scan_pi, "omp": scan_omp}
+
+
+def scan_session(client, path, st):
+    SCANNERS.get(client, scan_claude)(path, st)
+
+
 def pi_sessions(hours):
     cutoff = time.time() - hours * 3600
     out = []
@@ -349,6 +381,20 @@ def pi_sessions(hours):
             continue
         sid = os.path.basename(p).split("_", 1)[-1][:-6]
         out.append(("pi", sid, p, ""))
+    return out
+
+
+def omp_sessions(hours):
+    cutoff = time.time() - hours * 3600
+    out = []
+    for p in glob.glob(os.path.join(HOME, ".omp", "agent", "sessions", "*", "*.jsonl")):
+        try:
+            if os.path.getmtime(p) < cutoff:
+                continue
+        except OSError:
+            continue
+        sid = os.path.basename(p).split("_", 1)[-1][:-6]
+        out.append(("omp", sid, p, ""))
     return out
 
 
@@ -391,7 +437,7 @@ def loops(calls):
 
 def analyse(client, sid, path, cwd_hint, now):
     st = blank()
-    {"claude": scan_claude, "codex": scan_codex, "pi": scan_pi}[client](path, st)
+    scan_session(client, path, st)
     if not st["req"]:
         return None
     st["cwd"] = st["cwd"] or cwd_hint
@@ -467,7 +513,7 @@ def main():
     ap.add_argument("--hours", type=float, default=6)
     ap.add_argument("--all", action="store_true", help="include idle sessions")
     ap.add_argument("--cwd", help="only sessions whose cwd starts with this path")
-    ap.add_argument("--client", choices=["claude", "codex", "pi"])
+    ap.add_argument("--client", choices=["claude", "codex", "pi", "omp"])
     ap.add_argument("--session", help="id or path of one session")
     ap.add_argument("--detail", action="store_true")
     ap.add_argument("--json", action="store_true")
@@ -488,13 +534,16 @@ def main():
 
 def collect(a):
     now = time.time()
-    found = claude_sessions(a.hours) + codex_sessions(a.hours) + pi_sessions(a.hours)
+    found = (claude_sessions(a.hours) + codex_sessions(a.hours) + pi_sessions(a.hours)
+             + omp_sessions(a.hours))
     if a.subs or a.session:
         found += claude_subsessions(a.hours)
     if a.session:
         found = [f for f in found if a.session in f[1] or a.session == f[2]]
         if not found and os.path.isfile(a.session):
-            c = "claude" if "/.claude/" in a.session else "codex" if "/.codex/" in a.session else "pi"
+            c = ("claude" if "/.claude/" in a.session else
+                 "codex" if "/.codex/" in a.session else
+                 "omp" if "/.omp/" in a.session else "pi")
             found = [(c, os.path.basename(a.session), a.session, "")]
     rows = []
     for client, sid, path, cwd in found:

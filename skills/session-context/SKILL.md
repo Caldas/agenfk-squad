@@ -51,8 +51,8 @@ every minute inside each session: it orders the main session to write the
 handoff before it overflows, orders the sub-session to return a return
 handoff, denies the identical repeated call and denies a new dispatch once the
 orchestrator has gone over the ceiling. Thresholds and variables are in the
-header of `hooks/squad-watch.py`. Codex and pi do not have this hook: there,
-`--watch` does the job.
+header of `hooks/squad-watch.py`. Codex, pi and oh-my-pi do not have this hook:
+there, `--watch` does the job.
 
 In Claude Code the cockpit shows the same thing on the status line (`ctx`,
 `burn`, `reread`, HANDOFF gauge). In pi, the cockpit extension flashes HANDOFF.

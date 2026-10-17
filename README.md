@@ -200,7 +200,7 @@ Then open a project that has an AgenFK board and ask for something:
 
 | Skill | What it is |
 |---|---|
-| `session-context` | Context indicators for Claude Code, Codex and pi sessions (`scripts/session_context.py`), the thresholds, and the protocol for switching tasks |
+| `session-context` | Context indicators for Claude Code, Codex, pi and oh-my-pi sessions (`scripts/session_context.py`), the thresholds, and the protocol for switching tasks |
 | `clear-pickup` | Writes a handoff file from ground truth (git state plus session state) before a context clear, and reloads it afterwards |
 | `parallel-git` | One card = one branch = one worktree = one session; disjoint fronts; writer claims; merge train with squash and `rebase --onto` |
 | `ci-cost` | Fewer CI minutes without loosening a gate: measure (billing API, per-job ceil, cancelled minutes), then cut in order of gain; PR mutation over the changed lines (`scripts/changed-ranges.mjs`, `scripts/mutation-since.sh`, Stryker) |
@@ -221,8 +221,8 @@ This is the working setup of one person, published as it is. It runs daily on
 Linux with Claude Code. The automatic session switch depends on the
 [herdr](docs/installation.md#optional-dependencies) pane manager; without it the watcher still
 orders the handoff and you type `/clear` and `/clear-pickup pickup` yourself.
-The session report reads Codex and pi transcripts too, but the hooks only
-drive Claude Code. [ROADMAP.md](ROADMAP.md) lists what that leaves open.
+The session report reads Codex, pi and oh-my-pi transcripts too, but the hooks
+only drive Claude Code. [ROADMAP.md](ROADMAP.md) lists what that leaves open.
 
 ## Contributing
 
