@@ -1,0 +1,8 @@
+{
+  "skill_name": "parallel-plan",
+  "evals": [
+    {"id": 1, "prompt": "Here is our complete card export. Order the next wave; the story depends on schema and both child tasks touch src/registry.py.", "should_trigger": true, "expected_output": "Inherit schema dependency into both leaves, serialize shared file, provide forecast to product/github only.", "assertions": ["Parent constraints apply to each leaf", "No dispatch or card mutation"]},
+    {"id": 2, "prompt": "What can run in parallel after the prerequisite was archived? One card has no Touches line and another has docs/*.md.", "should_trigger": true, "expected_output": "Archived prerequisite is blocked, not done; unknown Touches is singleton; distinguish first wave from future forecast.", "assertions": ["ARCHIVED is not DONE", "Unknown Touches is not parallel-safe"]},
+    {"id": 3, "prompt": "Write a Python example that fetches three public URLs concurrently. This is not our agent dispatch plan.", "should_trigger": false, "expected_output": "Normal coding/task workflow; do not schedule AgenFK cards from the concurrency keyword.", "assertions": ["Do not confuse program concurrency with agent scheduling"]}
+  ]
+}

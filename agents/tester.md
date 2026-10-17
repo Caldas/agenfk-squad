@@ -94,6 +94,10 @@ logged PASSED or FAILED.
 
 ## Skills
 
+- `engineering-evidence` for regression reproducers, contract negatives and
+  telemetry redaction/cardinality tests. No real cloud/model calls or private
+  payloads in the suite; missing infrastructure is not a product-code failure.
+
 - `agenfk-test` describes the step; this agent is the one that executes it.
 - The project's suite-discipline skills (e.g. `credential-isolation`,
   `evidence`, `token-sampling`) when the `CLAUDE.md` names them.

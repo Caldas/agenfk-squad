@@ -128,6 +128,13 @@ say so; a review that always finds something critical tells nobody anything.
 
 ## Skills
 
+- `pr-evidence` for repository-template and current-head review/check evidence;
+  a self-review or an uncollected thread list is not independent approval.
+- `ci-plan-evidence` for Terraform CI artifacts; never substitute a laptop plan.
+- `engineering-evidence` for contract, exfiltration and telemetry risk. Verify
+  sensitive-source to outbound-sink paths before reporting a leak. Imports and
+  suspicious text alone are not proof. Do not execute imported packages.
+
 - `code-review` (built-in) for reading correctness defects; `security-review`
   (built-in) when the diff touches auth, secrets, network, personal data,
   external input.

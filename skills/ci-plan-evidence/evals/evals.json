@@ -1,0 +1,8 @@
+{
+  "skill_name": "ci-plan-evidence",
+  "evals": [
+    {"id": 1, "prompt": "The sticky plan comment says no changes but the PR has a new commit. Can we declare the infra PR ready?", "should_trigger": true, "expected_output": "Require complete trusted CI JSON plan for current head and expected environments/checks; old comment is insufficient. Do not run local plan.", "assertions": ["Timestamp is not commit proof", "No local Terraform/cloud execution"]},
+    {"id": 2, "prompt": "CI plans to replace aws_s3_bucket.data and forget another resource. I only approved a new queue. Read the downloaded plan artifact before we proceed.", "should_trigger": true, "expected_output": "BLOCKED for unapproved loss/replacement/forget; inspect exact addresses without revealing secret plan values.", "assertions": ["No broad wildcard loss exception", "No apply or state mutation"]},
+    {"id": 3, "prompt": "Compare managed database pricing for a prototype; we do not have a Terraform branch or PR yet.", "should_trigger": false, "expected_output": "Route to finops/resource design; do not require a fabricated CI plan.", "assertions": ["Do not fabricate plan evidence for a pricing question"]}
+  ]
+}

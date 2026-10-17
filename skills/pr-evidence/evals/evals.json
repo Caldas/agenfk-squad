@@ -1,0 +1,8 @@
+{
+  "skill_name": "pr-evidence",
+  "evals": [
+    {"id": 1, "prompt": "Review PR 42. It got approval before yesterday's push; CI is green and I want to merge it now.", "should_trigger": true, "expected_output": "Collect current head and complete API evidence; stale approval is WAITING, no merge or auto-post.", "assertions": ["Do not reuse an older-head approval", "Require designated independent reviewer and complete threads/checks"]},
+    {"id": 2, "prompt": "gh pr create bypassed our PULL_REQUEST_TEMPLATE.md. Check that the body answers Rollback and Migration, even though the standard ten sections exist.", "should_trigger": true, "expected_output": "Run explicit template check; absent or empty repository headings block; retain project title/body policy.", "assertions": ["Repository headings are required", "No invented title verb whitelist"]},
+    {"id": 3, "prompt": "Change the PR preview button padding from 8px to 12px in the frontend component; do not publish a PR.", "should_trigger": false, "expected_output": "Use frontend/project instructions rather than a PR evidence/review process.", "assertions": ["Do not trigger from the PR keyword alone"]}
+  ]
+}
