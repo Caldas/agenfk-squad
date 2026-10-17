@@ -31,12 +31,17 @@ A missing `agenfk`, `gh` or `git` skips its check with one line saying so.
 --hours START-END (local time, END exclusive, may wrap past midnight) makes a run
 outside those hours print nothing: a catch-up run at 23:00 stays quiet.
 
+A value that does not parse (a timestamp that is not a finite number, a project
+root that is not a string) drops that one finding; a check that still breaks
+prints one "skipped <check>" line and the other checks run: never a traceback.
+
 Acts on nothing: no card moves, no merges, no messages. Standard library only.
 """
 import argparse
 import datetime
 import glob
 import json
+import math
 import os
 import re
 import shlex
@@ -132,7 +137,18 @@ def shell_path(path):
     return "~" if shown == "~" else shlex.quote(shown)
 
 
+def finite(value):
+    """A real, finite number as a float (not a bool, not NaN or +-Infinity), or None."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    value = float(value)
+    return value if math.isfinite(value) else None
+
+
 def ago(seconds):
+    seconds = finite(seconds)
+    if seconds is None or seconds < 0:
+        return "?"
     if seconds >= 2 * DAY:
         return f"{int(seconds // DAY)}d"
     if seconds >= 2 * 3600:
@@ -276,8 +292,8 @@ def check_turn(turn_max, now):
         settle = ("Next: any session in that repository runs squad-turn status (the watcher settles a stale "
                   "turn), or the holder gives it back: squad-turn release")
         if isinstance(holder, dict):
-            since = holder.get("since")
-            if isinstance(since, (int, float)) and now - since > turn_max:
+            since = finite(holder.get("since"))
+            if since is not None and now - since > turn_max:
                 session = holder.get("session")
                 session = session[:8] if isinstance(session, str) and SESSION_ID.fullmatch(session[:8]) else "?"
                 num = pr_number(holder.get("pr"))
@@ -285,7 +301,7 @@ def check_turn(turn_max, now):
                 lines.append(f"merge-turn {name}: {who} has held the merge turn for {ago(now - since)} "
                              f"(max {ago(turn_max)}){waiting}. {settle}")
         elif queue:
-            asked = min((e.get("asked") for e in queue if isinstance(e.get("asked"), (int, float))), default=None)
+            asked = min((finite(e.get("asked")) for e in queue if finite(e.get("asked")) is not None), default=None)
             held = f" for {ago(now - asked)}" if asked is not None else ""
             lines.append(f"merge-turn {name}: nobody holds the turn but {len(queue)} session(s) wait{held}. {settle}")
     return lines
@@ -313,7 +329,7 @@ def reflog_time(gd):
             fh.seek(0, os.SEEK_END)
             fh.seek(max(0, fh.tell() - 4096))
             last = fh.read().decode("utf-8", "replace").rstrip("\n").rsplit("\n", 1)[-1]
-        return float(last.split("\t", 1)[0].rsplit(" ", 2)[-2])
+        return finite(float(last.split("\t", 1)[0].rsplit(" ", 2)[-2]))
     except (OSError, ValueError, IndexError):
         return None
 
@@ -424,7 +440,7 @@ def board_projects():
 def find_repos(paths):
     seen, repos = set(), []
     for p in paths:
-        if not p or not os.path.isdir(p):
+        if not isinstance(p, str) or not p or not os.path.isdir(p):
             continue
         common = git_common_dir(p)
         if not common or common in seen:
@@ -433,6 +449,17 @@ def find_repos(paths):
         top = os.path.dirname(common) if os.path.basename(common) == ".git" else common
         repos.append({"common": common, "top": top if os.path.isdir(top) else p, "name": repo_name(common)})
     return sorted(repos, key=lambda r: r["name"])
+
+
+def guarded(lines, check, fn, *args):
+    """fn(*args), or [] plus one "skipped" line in `lines` if it raises: one broken check
+    does not take the other checks' lines with it, and nothing prints a traceback."""
+    try:
+        return fn(*args)
+    except Exception as exc:                    # anything: a bug here must not cost the others
+        lines.append(f"skipped {check}: the check broke ({type(exc).__name__}), its findings are not shown. "
+                     "Next: owner opens an issue naming the check and the error")
+        return []
 
 
 def main(argv=None):
@@ -451,19 +478,20 @@ def main(argv=None):
         return 0
     now = time.time()
     lines = []
-    projects = board_projects()
-    lines += check_cards(projects, a.card_days, now)
+    projects = guarded(lines, "board-projects", board_projects)
+    lines += guarded(lines, "stale-card", check_cards, projects, a.card_days, now)
     if shutil.which("git"):
         roots = a.repo or [p.get("projectRoot") for p in projects] + [os.getcwd()]
-        repos = find_repos(roots)
-        lines += check_prs(repos, a.pr_hours, now)
+        repos = guarded(lines, "repositories", find_repos, roots)
+        lines += guarded(lines, "pr-no-review", check_prs, repos, a.pr_hours, now)
     else:
         repos = []
         lines.append("skipped pr-no-review and idle-worktree: git not found on PATH.")
-    lines += check_turn(env_int("SQUAD_TURN_MAX", 3600), now)
-    lines += check_worktrees(repos, a.worktree_days, now)
+    lines += guarded(lines, "merge-turn", check_turn, env_int("SQUAD_TURN_MAX", 3600), now)
+    lines += guarded(lines, "idle-worktree", check_worktrees, repos, a.worktree_days, now)
     dirs = HANDOFF_DIRS + [os.path.join(r["top"], ".claude", "handoffs") for r in repos] + a.handoffs
-    lines += check_handoffs(list(dict.fromkeys(os.path.realpath(d) for d in dirs)), a.handoff_days, now)
+    lines += guarded(lines, "old-handoff", check_handoffs, list(dict.fromkeys(os.path.realpath(d) for d in dirs)),
+                     a.handoff_days, now)
     for ln in lines:
         print(ln)
     return 0

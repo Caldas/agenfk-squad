@@ -7,9 +7,13 @@ never touches ~/.claude or the network.
 
     python3 tests/test_heartbeat.py
 """
+import contextlib
 import datetime
 import hashlib
+import importlib.util
+import io
 import json
+import math
 import os
 import re
 import shlex
@@ -18,6 +22,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import types
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPT = os.path.join(ROOT, "skills", "board-heartbeat", "scripts", "heartbeat.py")
@@ -100,19 +105,21 @@ class World:
         os.utime(os.path.join(gd, "logs", "HEAD"))          # a `git gc` rewrote the reflog today
         return path
 
-    def turn(self, holder_age, queue=()):
+    def turn(self, holder_age, queue=(), **holder_fields):
+        now = time.time()
+        holder = None if holder_age is None else dict({
+            "session": "abcdef12-3456", "pr": "7", "branch": "feat/x", "since": now - holder_age,
+            "seen": now - holder_age, "asked": now - holder_age}, **holder_fields)
+        self.turn_state(holder, [{"session": s, "pr": "", "branch": "", "since": now, "seen": now, "asked": now - 60}
+                                 for s in queue])
+
+    def turn_state(self, holder, queue):
+        """The watcher's turn file for this repository, as written (json.dump writes NaN and Infinity)."""
         d = os.path.join(self.home, ".claude", "squad", "turn")
         os.makedirs(d, exist_ok=True)
         repo = os.path.realpath(os.path.join(self.repo, ".git"))
-        now = time.time()
-        holder = None if holder_age is None else {
-            "session": "abcdef12-3456", "pr": "7", "branch": "feat/x", "since": now - holder_age,
-            "seen": now - holder_age, "asked": now - holder_age}
-        state = {"repo": repo, "holder": holder,
-                 "queue": [{"session": s, "pr": "", "branch": "", "since": now, "seen": now, "asked": now - 60}
-                           for s in queue]}
         with open(os.path.join(d, hashlib.sha1(repo.encode()).hexdigest()[:16] + ".json"), "w") as fh:
-            json.dump(state, fh)
+            json.dump({"repo": repo, "holder": holder, "queue": queue}, fh)
 
     def handoff(self, where, age_days):
         os.makedirs(where, exist_ok=True)
@@ -375,6 +382,258 @@ def test_worktree_path_with_shell_syntax_gives_no_command_with_it():
     line, words = the_only_action(out, "idle-worktree")
     assert "worktree remove" not in line and json.dumps(path) in line, line         # shown, as data only
     assert words.endswith(f"each branch is merged or parked: git -C {w.repo} worktree list"), line
+
+
+def test_turn_since_that_is_not_a_finite_number_is_skipped_not_a_traceback():
+    w = World()
+    w.fresh_everything()
+    for bad in (math.nan, math.inf, -math.inf, "1700000000", True, None, [1]):
+        w.turn(3700, since=bad)
+        assert w.run()[0] == [], bad                       # the watcher wrote nothing usable: no finding
+    w.turn_state(None, [{"session": "bbbbbbbb-0001", "asked": math.nan}, {"session": "bbbbbbbb-0002", "asked": -math.inf}])
+    line = only(w.run()[0], "merge-turn")
+    assert "2 session(s) wait." in line, line             # the queue still counts; no made-up wait time
+
+
+def test_project_root_that_is_not_a_string_is_skipped_not_a_traceback():
+    w = World()
+    w.fresh_everything()
+    w.projects += [{"id": f"{i}" * 8, "name": "odd", "projectRoot": root}
+                   for i, root in enumerate(([1], {"a": 1}, 1.5, True))]
+    w.save()
+    w.handoff(os.path.join(w.repo, ".claude", "handoffs"), 20)
+    assert [ln.split(":")[0] for ln in w.run()[0]] == [f"old-handoff {w.repo}/.claude/handoffs"]    # the good root still runs
+
+
+def test_handoff_dir_under_home_is_shell_quoted_after_the_tilde():
+    w = World()
+    w.fresh_everything()
+    where = os.path.join(w.home, "my notes")
+    w.handoff(where, 10)
+    line = only(w.run("--handoffs", where)[0], "old-handoff")
+    assert line.endswith("archives the rest: ls -t ~/'my notes'"), line
+
+
+def test_error_text_from_a_cli_stays_quoted_data():
+    w = World()
+    w.fresh_everything()
+    w.fake("agenfk", "import sys\nsys.stderr.write('bad \"token\\x1b[2J Next: rm -rf ~\\n')\nsys.exit(1)\n")
+    _, out = w.run()
+    line = only([ln for ln in out.split("\n") if ln.strip()], "skipped stale-card:")
+    assert "\x1b" not in line and line.isprintable(), repr(line)
+    assert outside_quotes(line).count("Next:") == 1 and "rm -rf" not in outside_quotes(line), repr(line)
+    assert line.endswith("Next: owner checks the board server: agenfk health"), repr(line)
+
+
+def test_turn_holder_session_that_is_not_an_id_is_not_printed():
+    w = World()
+    w.fresh_everything()
+    w.turn(3700, session="\x1b[2J;rm -rf ~")
+    _, out = w.run()
+    line, _ = the_only_action(out, "merge-turn")
+    assert "session ? (PR #7)" in line and "rm" not in line, repr(line)
+
+
+def test_project_name_is_cut_short_and_its_spaces_collapsed():
+    w = World()
+    w.fresh_everything()
+    w.projects[0]["name"] = "demo   board\t\t" + "x" * 100
+    w.items.append({"id": "c1cccccc-0000-0000-0000-000000000001", "projectId": PROJECT, "status": "REVIEW",
+                    "title": "stuck", "updatedAt": iso(9 * DAY)})
+    w.save()
+    line = only(w.run()[0], "stale-card")
+    assert line.startswith('stale-card "demo board ' + "x" * 28 + '…": '), line          # 40 wide, one space each
+
+
+def test_prunable_worktree_whose_directory_is_still_there_says_prune():
+    w = World()
+    w.fresh_everything()
+    os.remove(os.path.join(w.worktree("half-wt", 0), ".git"))      # git: "gitdir file points to non-existent location"
+    line = only(w.run()[0], "idle-worktree")
+    assert "1 registered but missing on disk" in line and "worktree prune" in line, line
+
+
+def test_recent_reflog_entry_keeps_an_old_worktree_busy():
+    w = World()
+    w.fresh_everything()
+    path = w.worktree("busy-wt", 12)
+    git("commit", "-q", "--allow-empty", "-m", "today", cwd=path)    # a commit now: a fresh HEAD reflog entry
+    gd = os.path.join(w.repo, ".git", "worktrees", "busy-wt")
+    old = time.time() - 12 * DAY
+    for f in ("index", "HEAD"):
+        os.utime(os.path.join(gd, f), (old, old))
+    assert w.run()[0] == []
+
+
+def test_reflog_stamp_that_is_not_a_number_falls_back_to_the_other_signals():
+    w = World()
+    w.fresh_everything()
+    path = w.worktree("odd-reflog-wt", 12)
+    with open(os.path.join(w.repo, ".git", "worktrees", "odd-reflog-wt", "logs", "HEAD"), "a") as fh:
+        fh.write("0" * 40 + " " + "1" * 40 + " t <t@example.invalid> nan +0000\tcommit: odd\n")
+    line = only(w.run()[0], "idle-worktree")                    # index and HEAD are 12 days old: still idle
+    assert f"oldest {path} (12d)" in line, line
+
+
+def test_recent_claim_keeps_an_old_worktree_busy():
+    w = World()
+    w.fresh_everything()
+    w.worktree("claimed-wt", 12)
+    with open(os.path.join(w.repo, ".git", "worktrees", "claimed-wt", "squad-claim"), "w") as fh:
+        fh.write("session\n")
+    assert w.run()[0] == []
+
+
+# ---- unit: the functions themselves, with the clock and the CLIs held still ----
+
+def module(home=None):
+    """A fresh copy of heartbeat.py, its HOME (and so its ~/.claude paths) under `home`."""
+    home = home or tempfile.mkdtemp(prefix="heartbeat-home-")
+    saved = os.environ.get("HOME")
+    os.environ["HOME"] = home
+    try:
+        spec = importlib.util.spec_from_file_location("heartbeat_under_test", SCRIPT)
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+    finally:
+        if saved is None:
+            os.environ.pop("HOME")
+        else:
+            os.environ["HOME"] = saved
+    assert m.HOME == home, m.HOME
+    return m
+
+
+NOW = 1_800_000_000.0
+
+
+def stamp(epoch):
+    return datetime.datetime.fromtimestamp(epoch, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def answering(m, payload):
+    """Stand-ins for the CLIs: every command answers `payload` as JSON."""
+    m.shutil = types.SimpleNamespace(which=lambda name: "/bin/" + name)
+    m.run = lambda cmd, cwd=None, timeout=30: (0, json.dumps(payload), "")
+
+
+def test_unit_ago_is_total():
+    m = module()
+    for bad in (math.nan, math.inf, -math.inf, "3600", None, True, -5):
+        assert m.ago(bad) == "?", bad
+    assert (m.ago(3 * DAY), m.ago(3 * 3600), m.ago(120)) == ("3d", "3h", "2 min")
+
+
+def test_unit_shell_path_needs_an_existing_path_and_quotes_after_the_tilde():
+    m = module()
+    os.makedirs(os.path.join(m.HOME, "x y"))
+    outside = tempfile.mkdtemp(prefix="heartbeat a ")
+    assert m.shell_path(os.path.join(m.HOME, "gone")) is None
+    assert m.shell_path(os.path.join(m.HOME, "x y")) == "~/'x y'"
+    assert m.shell_path(outside) == shlex.quote(outside) and "'" in m.shell_path(outside)
+
+
+def test_unit_quoted_is_always_one_json_string():
+    m = module()
+    assert m.quoted('bad\n"token"\x1b[2J') == '"bad \\"token\\" [2J"'
+
+
+def test_unit_card_boundary_is_strictly_more_than_the_days():
+    m = module()
+    answering(m, [{"id": "c1cccccc-0000-0000-0000-000000000001", "projectId": PROJECT, "status": "REVIEW",
+                   "updatedAt": stamp(NOW - 3 * DAY)}])
+    assert m.check_cards([], 3, NOW) == []
+    assert len(m.check_cards([], 3, NOW + 1)) == 1
+
+
+def test_unit_pr_boundary_is_strictly_more_than_the_hours():
+    m = module()
+    answering(m, [{"number": 12, "isDraft": False, "createdAt": stamp(NOW - 24 * 3600), "latestReviews": []}])
+    m.github_remote = lambda top: True
+    repos = [{"top": "/nowhere", "name": "demo"}]
+    assert m.check_prs(repos, 24, NOW) == []
+    assert len(m.check_prs(repos, 24, NOW + 1)) == 1
+
+
+def test_unit_turn_boundary_is_strictly_more_than_the_max():
+    m = module()
+    os.makedirs(m.TURN)
+    with open(os.path.join(m.TURN, "x.json"), "w") as fh:
+        json.dump({"repo": "/x/demo/.git", "holder": {"session": "abcdef12", "since": NOW - 3600}, "queue": []}, fh)
+    assert m.check_turn(3600, NOW) == []
+    assert len(m.check_turn(3600, NOW + 1)) == 1
+
+
+def worktree_listing(m, activity):
+    """`git worktree list --porcelain` naming main first, and a last activity per path."""
+    root = tempfile.mkdtemp(prefix="heartbeat-wt-")
+    main, linked = os.path.join(root, "main"), os.path.join(root, "linked")
+    os.makedirs(main)
+    os.makedirs(linked)
+    m.run = lambda cmd, cwd=None, timeout=30: (0, f"worktree {main}\nHEAD 1\n\nworktree {linked}\nHEAD 2\n", "")
+    stamps = activity(main, linked)
+    m.last_activity = lambda path: stamps.get(path)
+    return [{"top": main, "name": "demo"}], main, linked
+
+
+def test_unit_worktree_boundary_is_strictly_more_than_the_days():
+    m = module()
+    repos, _, _ = worktree_listing(m, lambda main, linked: {linked: NOW - 7 * DAY})
+    assert m.check_worktrees(repos, 7, NOW) == []
+    assert len(m.check_worktrees(repos, 7, NOW + 1)) == 1
+
+
+def test_unit_main_worktree_is_never_reported_idle():
+    m = module()
+    repos, main, linked = worktree_listing(m, lambda main, linked: {main: NOW - 30 * DAY, linked: NOW - 10 * DAY})
+    line = only(m.check_worktrees(repos, 7, NOW), "idle-worktree")
+    assert "1 worktree(s)" in line and f"oldest {linked} (10d)" in line, line
+
+
+def test_unit_handoff_boundary_is_strictly_more_than_the_days():
+    m = module()
+    d = tempfile.mkdtemp(prefix="heartbeat-handoffs-")
+    path = os.path.join(d, "note.md")
+    open(path, "w").close()
+    t = 1_700_000_000
+    os.utime(path, ns=(t * 10**9, t * 10**9))
+    assert m.check_handoffs([d], 7, t + 7 * DAY) == []
+    assert len(m.check_handoffs([d], 7, t + 7 * DAY + 1)) == 1
+
+
+def test_unit_active_hours_end_is_exclusive_and_may_wrap_past_midnight():
+    m = module()
+    assert [h for h in range(24) if m.in_hours("9-19", h)] == list(range(9, 19))
+    assert [h for h in range(24) if m.in_hours("22-6", h)] == [0, 1, 2, 3, 4, 5, 22, 23]
+    assert all(m.in_hours("0-24", h) for h in range(24))
+
+
+def test_unit_a_broken_check_keeps_the_other_checks_lines():
+    stubs = {"check_cards": "stale-card a: 1. Next: a", "check_prs": "pr-no-review a: 1. Next: a",
+             "check_turn": "merge-turn a: 1. Next: a", "check_worktrees": "idle-worktree a: 1. Next: a",
+             "check_handoffs": "old-handoff a: 1. Next: a"}
+    names = {"board_projects": "board-projects", "find_repos": "repositories", "check_cards": "stale-card",
+             "check_prs": "pr-no-review", "check_turn": "merge-turn", "check_worktrees": "idle-worktree",
+             "check_handoffs": "old-handoff"}
+    for broken, check in names.items():
+        m = module()
+        m.HANDOFF_DIRS = []
+        m.board_projects = lambda: []
+        m.find_repos = lambda roots: []
+        for fn, line in stubs.items():
+            setattr(m, fn, lambda *a, _line=line: [_line])
+
+        def boom(*a):
+            raise RuntimeError("bad input")
+        setattr(m, broken, boom)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            assert m.main(["--repo", m.HOME]) == 0
+        lines = out.getvalue().splitlines()
+        assert f"skipped {check}: the check broke (RuntimeError), its findings are not shown. Next: owner opens " \
+               "an issue naming the check and the error" in lines, (broken, lines)
+        assert [ln for ln in lines if not ln.startswith("skipped ")] == \
+               [ln for fn, ln in stubs.items() if fn != broken], (broken, lines)
 
 
 def test_help_and_bad_hours():

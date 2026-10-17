@@ -31,7 +31,7 @@ python3 ~/.claude/skills/board-heartbeat/scripts/heartbeat.py --help
 | `merge-turn <repo>` | the merge turn (`~/.claude/squad/turn/`, the watcher's queue) held too long, or a queue nobody holds | `SQUAD_TURN_MAX` (3600 s) | any session runs `squad-turn status`; the holder `squad-turn release` |
 | `idle-worktree <repo>` | linked worktrees with no commit, checkout or claim; worktrees missing on disk | `--worktree-days 7` | `github` agent: merged or parked, then `git worktree remove`; `git worktree prune` |
 | `old-handoff <dir>` | handoff files older than the bar | `--handoff-days 7` | `context` agent: pick up what is open, archive the rest |
-| `skipped ...` | a check that could not run (`agenfk`, `gh` or `git` missing or failing) | | owner |
+| `skipped ...` | a check that could not run (`agenfk`, `gh` or `git` missing or failing), or that broke on input it did not expect | | owner |
 
 One line per project, repository or directory, never one per item: the count,
 the oldest item and its command. A board with 85 stale cards gives ten lines,
@@ -113,7 +113,9 @@ scheduled run will.
 ## Limits
 
 - **Read-only, local, best effort.** A check that cannot run says `skipped`
-  once and the others still run. It never prints a traceback.
+  once and the others still run. A value that does not parse (a timestamp that
+  is not a finite number, a project root that is not a string) drops that one
+  finding. It never prints a traceback.
 - **Ages come from what is on disk**: `updatedAt` on the card, `createdAt` on
   the PR, the last HEAD reflog entry, index, HEAD and claim for a worktree
   (not the reflog's mtime, which `git gc` rewrites), the file's mtime for a
