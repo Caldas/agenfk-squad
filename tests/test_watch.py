@@ -422,6 +422,7 @@ def test_session_that_does_not_write_the_handoff_the_watcher_takes_over_and_swit
     with open(prompts[1].split()[-1]) as fh:
         body = fh.read()
     assert "written by squad-watch" in body and "deliver card ABC-1" in body, body
+    assert "stopped without writing its own" in body and "compacted" not in body, body
     assert f"{sid}-dispatches.md" in body and "UNKNOWN" in body, body
     assert "\n## Next step\n" in body, body
 
