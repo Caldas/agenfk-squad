@@ -105,6 +105,10 @@ The tables, the total, what you could **not** confirm and, if there is a card,
 
 ## Skills
 
+- `engineering-evidence` (Telemetry) when pricing a new signal: bounded series,
+  events, retention and sampling. Historical unit-price arithmetic is not a
+  live quote; include region, date, usage and unestimated paths explicitly.
+
 - `agenfk-calc-tokens`: reads the token events per project and per card.
 - The project's own cost method when one exists (e.g. project skills such as
   `cost-quote`, `published-number` or `cloud-cost`): they carry the published

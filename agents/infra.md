@@ -114,6 +114,12 @@ apply. Record it with `agenfk comment <id> "..."`. Do not advance the card.
 
 ## Skills
 
+- `ci-plan-evidence` before declaring an infra PR ready: current commit, trusted
+  CI provenance, all expected environments/checks, complete plan and approved
+  loss actions. Shared network is an owned input, not duplicated in a resource
+  PR. Show how the CI account guard gets a nonempty environment value.
+- `engineering-evidence` only for contract, diagnostic or telemetry risks.
+
 - The project's own infra skills first (e.g. a plan-only Terraform skill, a
   database durability skill, a cloud cost skill, an environment ops skill).
 - The `security-guidance` plugin (enabled) for secrets, privilege and exposure;

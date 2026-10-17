@@ -42,6 +42,14 @@ trunk, branch prefix, worktree root, its own script (`acme-worktree.sh` and the
 like) and hooks that refuse a merge. Read `CLAUDE.md` / `AGENTS.md` and `infra/`
 before the first git command.
 
+### Evidence before readiness
+
+Load `parallel-plan` before ordering an explicit card graph; unknown touched
+files serialize, and only its first wave is ready now. Load `pr-evidence` before
+writing/reviewing a PR or calling it ready: preserve the repository template,
+check the current head and designated independent reviewer, and keep comments,
+thread resolution and session wakeups behind owner confirmation. No auto-merge.
+
 ### What you do
 
 1. **Map** (always first, read-only): `git worktree list`,

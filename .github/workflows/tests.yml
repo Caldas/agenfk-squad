@@ -26,6 +26,11 @@ jobs:
         run: python tests/test_vendor.py
       - name: Agent standing-order sections
         run: python tests/test_agents.py
+      - name: Offline evidence tools and skill contracts
+        run: |
+          for t in tests/test_pr_evidence.py tests/test_ci_plan_evidence.py tests/test_parallel_plan.py tests/test_bundle_contracts.py; do
+            python -B "$t" || exit 1
+          done
       - name: Check install.sh syntax
         run: bash -n install.sh
       - name: Watcher test suite
