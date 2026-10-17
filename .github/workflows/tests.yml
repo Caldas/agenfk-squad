@@ -24,6 +24,8 @@ jobs:
         run: python -m py_compile hooks/*.py skills/session-context/scripts/session_context.py
       - name: Vendor lock and install guard
         run: python tests/test_vendor.py
+      - name: Agent standing-order sections
+        run: python tests/test_agents.py
       - name: Check install.sh syntax
         run: bash -n install.sh
       - name: Watcher test suite
