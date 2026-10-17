@@ -1,0 +1,51 @@
+name: installer
+
+# Smoke test of the one-command installer on the systems it promises: Linux
+# (sh is dash) and macOS (sh is bash 3.2). Python 3.10 is the floor get.sh
+# accepts. Runs only when the installer or what it drives changes.
+on:
+  push:
+    branches: [main, beta]
+    paths:
+      - get.sh
+      - install.sh
+      - scripts/squad_settings.py
+      - hooks/manifest.json
+      - tests/test_get.py
+      - .github/workflows/installer.yml
+  pull_request:
+    paths:
+      - get.sh
+      - install.sh
+      - scripts/squad_settings.py
+      - hooks/manifest.json
+      - tests/test_get.py
+      - .github/workflows/installer.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: installer-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Lint get.sh as POSIX sh
+        if: runner.os == 'Linux'
+        run: shellcheck -s sh get.sh
+      - name: Compile the settings script
+        run: python -m py_compile scripts/squad_settings.py
+      - name: Installer test suite (throwaway HOME, file:// clone)
+        run: python tests/test_get.py
