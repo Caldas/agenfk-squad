@@ -48,6 +48,13 @@ guards against, run only that test, confirm **RED**, revert, confirm a clean
 - If the project has a mutation testing tool (Stryker, mutmut…), use it and
   report the score; it does not replace the targeted mutation of the claimed
   tests.
+- In a PR gate, the tool mutates the **lines** the branch changed, not whole
+  files (`ci-cost` skill §3). These are two different questions: the tool says
+  whether the new code is tested; the targeted mutation above says whether
+  **each claimed test** catches the defect it claims to catch, and it stays as
+  it is. A small sample (~10 mutants) makes the threshold swing on one or two
+  survivors: read the survivors before calling a red a defect, and a threshold
+  loosened to pass is a blocker.
 
 ## Then, what nobody was looking at
 

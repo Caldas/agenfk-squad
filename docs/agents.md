@@ -134,6 +134,7 @@ design before it becomes code: cost, IAM, network, persistence, rollback.
   `[SUGGESTION]`, and what the owner must run.
 - **Never:** `apply`, `destroy` or deploy. A new cloud resource is priced by
   `finops` **before** `infra` writes it.
+- **Uses:** the `ci-cost` skill for workflow changes.
 
 ## tester
 
@@ -175,11 +176,14 @@ integration and security flaws.
 
 Prices the monthly cloud cost of a design line by line, each line with a
 source, a date and a formula, at the measured volume and at ten times it.
-Measures token spend per card, project and model from AgenFK.
+Measures token spend per card, project and model from AgenFK, and CI minutes
+per job and per PR branch.
 
 - **Dispatch when:** before any stack decision or new cloud resource; a
   document needs a cost table; closing an epic; "how much does this cost",
   "where can we cut".
+- **Uses:** the `ci-cost` skill to measure CI minutes (billing API plus a
+  per-job rounded minute).
 - **Never:** quotes a price without a dated source, or presents an assumption
   as a measurement.
 

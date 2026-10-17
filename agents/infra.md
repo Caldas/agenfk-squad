@@ -66,6 +66,27 @@ the account. In CI/CD: actions pinned by SHA, minimal permissions on the
 `GITHUB_TOKEN`, no secret in logs, and a failing step must not be skipped
 silently.
 
+## CI cost
+
+A new or changed workflow goes through these rules; the full method, the
+numbers and the scripts are in the `ci-cost` skill. Measure before cutting
+(`finops`, Meter 3), and never cut tests, review or the mutation gate.
+
+- **GitHub bills every job and rounds each one up to the minute.** Fewer,
+  heavier jobs win: each job pays a setup and one rounding.
+- **The expensive job waits for the cheap gates:** `needs: [gates, test]` +
+  `if: needs.<job>.result == 'success'`. Only on a job that is not a required
+  check; the name does not change.
+- **A `paths` filter on the expensive PR job** (dry run, image build): only
+  the inputs no suite proves. On push, the positives followed by the `!`
+  negations — the order matters.
+- **No duplicated task:** a `build` identical to `typecheck` runs twice.
+- **The PR secret scan covers `origin/main..HEAD`**; the full scan stays on
+  push to main. Keep the guards: config read from main, an empty ignore file,
+  a shallow clone refused.
+- **Write down the trade-off of each cut** in the workflow header or the
+  decision record: what stopped being proven where, and where it is proven now.
+
 ## Deliverable
 
 Real output of `fmt`/`validate`/`plan` (the count "N to add, N to change, N to

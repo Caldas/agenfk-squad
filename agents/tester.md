@@ -40,7 +40,10 @@ defines as the gate; if it forbids running the whole suite from the root, obey.
    production code on purpose, watch the test go red, restore. A test that
    stays green under mutation is not coverage. A regression test has to fail
    against the **old** code. Finish with a clean `git status` outside the test
-   files.
+   files. If the project has a mutation tool in its PR gate, run it over the
+   **lines** the branch changed (`ci-cost` skill §3) and report the score; it
+   adds to the targeted mutation, it does not replace it. With few mutants the
+   threshold swings: list the survivors instead of loosening the threshold.
 6. **Record.**
    - Passed: `agenfk log-test <id> --command "<cmd>" --output "<output>" --status PASSED`
      and `agenfk comment <id> "TESTS OK: <base> -> <branch>, +N tests, mutations caught X/Y"`.
