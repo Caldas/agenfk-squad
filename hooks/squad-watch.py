@@ -843,8 +843,8 @@ def run_dir(text, end, cwd, dirs=()):
     cds = list(CD.finditer(before))
     if len(CD_WORD.findall(before)) != len(cds):
         return None
-    if cds and re.search(r"[()]", before):
-        return None               # a cd inside a subshell may not apply here
+    if cds and re.search(r"[()]|\bfunction\b", before):
+        return None               # a cd inside a subshell or a function body may not apply here
     where = cwd
     for m in cds:                 # a cd that may not run, or not in this shell: `a && cd x`, `cd x || y`, `cd x |`
         if m.group("sep") in ("&&", "||", "|", "then", "else", "do") or m.group("next") in ("||", "|", "&"):
@@ -871,15 +871,17 @@ def push_source(args, where, cwd):
     not a trunk of the session's repository."""
     words = args.split()
     refs = [w for w in words if not w.startswith("-")]
+    every = any(len(o) > 2 and any(full.startswith(o) for full in ("--all", "--branches", "--mirror"))
+                for o in (w.partition("=")[0] for w in words))     # git takes `--al`, `--mir` too
     if where is None:
         session = trunks(cwd) if cwd and git_rc(cwd, "rev-parse", "--git-dir")[0] == 0 else []
         for ref in refs[1:] or ["HEAD"]:
             dst = ref.lstrip("+").rpartition(":")[2].removeprefix("refs/heads/")
-            if "/" not in dst or dst in session or "--all" in words or "--mirror" in words:
+            if "/" not in dst or dst in session or every:
                 return "HEAD"
         return None
     trunk = trunks(where) if where else ["main", "master"]
-    if "--all" in words or "--mirror" in words:
+    if every:
         return trunk[0]
     current = git_rc(where, "branch", "--show-current")[1] if where else ""
     for ref in refs:

@@ -764,8 +764,9 @@ def test_push_of_head_from_the_trunk_is_a_push_to_the_trunk():
     sid = "acac1111-0001"
     for cmd in ("git push origin HEAD", "git push -u origin HEAD", "git push origin @", "git push origin feat"):
         assert bash(h, "PreToolUse", sid, repo, cmd, sealed) == "nothing", cmd          # feat is not the trunk
-    out = bash(h, "PreToolUse", sid, repo, "git push --all origin", sealed)
-    assert "MERGE SEAL" in out and "push to the trunk" in out, out                     # --all pushes the trunk
+    for cmd in ("git push --all origin", "git push --al origin", "git push --branches origin", "git push --mir"):
+        out = bash(h, "PreToolUse", sid, repo, cmd, sealed)
+        assert "MERGE SEAL" in out and "push to the trunk" in out, (cmd, out)           # --all pushes the trunk
     git(repo, "checkout", "-q", "-B", "beta", "origin/beta")
     for cmd in ("git push origin HEAD", "git push -u origin HEAD", "git push origin @"):
         out = bash(h, "PreToolUse", sid, repo, cmd, sealed)
@@ -873,7 +874,8 @@ def test_an_unknown_directory_is_denied_whatever_the_sessions_repository_says():
     for cmd in (f'cd "$WT_B" && {GM} 5', 'cd "$WT_B" && git push origin HEAD:beta',
                 'cd "$WT_B" && git push origin release', 'cd "$WT_B" && git push --all origin feat/x',
                 f"builtin cd {repo} && git push origin HEAD:beta", f"command cd {repo}; {GM} 5",
-                f"X=1 cd {repo} && git push origin HEAD:beta"):
+                f"X=1 cd {repo} && git push origin HEAD:beta", 'cd "$WT_B" && git push --mir origin feat/x',
+                f"function f {{ cd {repo}; }}; git push origin HEAD:beta"):
         out = bash(h, "PreToolUse", sid, repo, cmd, env)
         assert "MERGE SEAL" in out and "literal path" in out, (cmd, out)
         assert holder(h) is None, cmd
