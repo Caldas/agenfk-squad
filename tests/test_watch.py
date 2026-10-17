@@ -461,7 +461,7 @@ def test_merge_queue_one_session_at_a_time_and_the_next_is_called():
     a, b = "aaaa1111-0001", "bbbb2222-0001"
     assert bash(h, "PreToolUse", a, repo, "gh pr merge 10 --squash", env) == "nothing"   # turn free: passes
     assert queue(h)[0]["holder"]["session"] == a
-    out = bash(h, "PreToolUse", b, repo, "cd x && gh pr merge 11 --squash", env)
+    out = bash(h, "PreToolUse", b, repo, f"cd {repo} && gh pr merge 11 --squash", env)
     assert "MERGE QUEUE" in out and "is merging" in out and "PR #10" in out, out
     assert "queue" not in queue(h)[0] and queue(h)[0]["intents"] == []                    # nobody waits in line
     assert bash(h, "PreToolUse", b, repo, "git fetch origin && git merge origin/main", env) == "nothing"
@@ -852,15 +852,34 @@ def test_an_unknown_directory_counts_only_a_push_that_may_reach_the_trunk():
     outside = os.path.join(h, "outside")
     os.makedirs(outside)
     for cmd in ('cd "$D" && git push -u origin feat/x', "cd /no/such/dir && git push origin feat/x:feat/x"):
-        assert bash(h, "PreToolUse", sid, repo, cmd, env) == "nothing", cmd
-        assert holder(h) is None, cmd
-        out = bash(h, "PreToolUse", sid, outside, cmd, env)      # outside a repository: no trunk to compare with
-        assert "MERGE SEAL" in out and "literal path" in out, (cmd, out)
+        for where in (repo, outside):
+            assert bash(h, "PreToolUse", sid, where, cmd, env) == "nothing", (where, cmd)
+            assert holder(h) is None, (where, cmd)
     git(repo, "config", "squad.seal", "true")
     for cmd in ('cd "$D" && git push', 'cd "$D" && git push origin', 'cd "$D" && git push -u origin HEAD',
                 'cd "$D" && git push origin @', 'cd "$D" && git push origin HEAD:beta', 'cd "$D" && git push origin main'):
         out = bash(h, "PreToolUse", sid, repo, cmd, env)
         assert "MERGE SEAL" in out and "literal path" in out, (cmd, out)
+
+
+def test_an_unknown_directory_is_denied_whatever_the_sessions_repository_says():
+    """Security review of round 4: from a repository without the seal (trunk main
+    only), `cd "$WT_B" && <merge>` and `cd "$WT_B" && git push origin HEAD:beta`
+    passed unchecked, though the seal may be on in B and beta may be its trunk;
+    `builtin cd <repo>` was not followed and the push was checked in the cwd."""
+    h = home()
+    repo, env, _ = origin_repo(h)
+    sid = "aeae1111-0001"
+    for cmd in (f'cd "$WT_B" && {GM} 5', 'cd "$WT_B" && git push origin HEAD:beta',
+                'cd "$WT_B" && git push origin release', 'cd "$WT_B" && git push --all origin feat/x',
+                f"builtin cd {repo} && git push origin HEAD:beta", f"command cd {repo}; {GM} 5",
+                f"X=1 cd {repo} && git push origin HEAD:beta"):
+        out = bash(h, "PreToolUse", sid, repo, cmd, env)
+        assert "MERGE SEAL" in out and "literal path" in out, (cmd, out)
+        assert holder(h) is None, cmd
+    assert bash(h, "PreToolUse", sid, repo, 'cd "$WT_B" && git push origin HEAD:beta',
+                {**env, "SQUAD_SEAL": "0"}) == "nothing"
+    assert bash(h, "PreToolUse", sid, repo, f"cd {repo} && git push origin feat/x", env) == "nothing"
 
 
 def test_turn_status_falls_back_to_master():

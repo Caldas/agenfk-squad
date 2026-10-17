@@ -189,6 +189,7 @@ GIT_PUSH = re.compile(r"\bgit((?:[ \t]+-[Cc][ \t]+\S+|[ \t]+--?[A-Za-z][\w-]*(?:
 # Where a merge or push runs: each `cd` before it moves the directory; these make it unknown.
 CD = re.compile(r"(?:^|(?P<sep>&&|\|\||[;&|(\n{\"']|\b(?:then|else|do)\b))[ \t]*cd(?=[\s;&|)\"']|$)"
                 r"(?P<arg>[^;&|\n)]*)(?=(?P<next>&&|\|\||[;&|\n)])|$)")
+CD_WORD = re.compile(r"(?<![\w.~/\\-])cd(?=[\s;&|)\"']|$)")     # every cd, `builtin cd` too
 ELSEWHERE = re.compile(r"\bGIT_(?:DIR|WORK_TREE)=|--git-dir\b|--work-tree\b|\benv\b[^;&|\n]*[ \t]-C\b|\b(?:pushd|popd)\b")
 LITERAL_DIR = re.compile(r"[A-Za-z0-9._/~+,@%=-]+")
 TURN_CLI = re.compile(AT + r"(?:\S*/)?squad-turn(?:\.py)?\s+(request|release|status)\b(?:\s+#?(\d+))?")
@@ -833,11 +834,15 @@ def run_dir(text, end, cwd, dirs=()):
     moved by each `cd` before it and then by each `git -C` (dirs). None when the
     watcher cannot tell: a variable or quotes in the path, `cd -`, a subshell,
     a cd that may not run (after &&, ||, |, then, else, do; before ||, |, &),
-    pushd/popd, GIT_DIR, --git-dir, env -C, a directory that does not exist."""
+    a cd in a form it does not follow (`builtin cd`, `command cd`, `VAR=x cd`;
+    merge_text has already turned `\\cd` into `cd`), pushd/popd, GIT_DIR, --git-dir, env -C, a directory that does
+    not exist."""
     before = text[:end]
     if ELSEWHERE.search(before):
         return None
     cds = list(CD.finditer(before))
+    if len(CD_WORD.findall(before)) != len(cds):
+        return None
     if cds and re.search(r"[()]", before):
         return None               # a cd inside a subshell may not apply here
     where = cwd
@@ -861,19 +866,21 @@ def push_source(args, where, cwd):
     (in doubt, it is); `HEAD` alone is the current branch; --all and --mirror
     push the trunk too; with no refspec, the current branch is pushed, to the
     trunk if it is the trunk or if its push target is. `where` None: the watcher
-    cannot tell the repository nor its branch; the push counts when it may send
-    the current branch (no refspec, `HEAD`, `@`) or names a trunk of the session's
-    repository (`cwd`), main or master; outside any repository, every push counts."""
-    if where is None and (not cwd or git_rc(cwd, "rev-parse", "--git-dir")[0] != 0):
-        return "HEAD"
-    base = where if where is not None else cwd
-    trunk = trunks(base) if base else ["main", "master"]
+    cannot tell the repository, its trunk nor its branch, so the push counts
+    unless every refspec sends to a branch with a `/` in its name (feat/x) that is
+    not a trunk of the session's repository."""
     words = args.split()
+    refs = [w for w in words if not w.startswith("-")]
+    if where is None:
+        session = trunks(cwd) if cwd and git_rc(cwd, "rev-parse", "--git-dir")[0] == 0 else []
+        for ref in refs[1:] or ["HEAD"]:
+            dst = ref.lstrip("+").rpartition(":")[2].removeprefix("refs/heads/")
+            if "/" not in dst or dst in session or "--all" in words or "--mirror" in words:
+                return "HEAD"
+        return None
+    trunk = trunks(where) if where else ["main", "master"]
     if "--all" in words or "--mirror" in words:
         return trunk[0]
-    refs = [w for w in words if not w.startswith("-")]
-    if where is None and (len(refs) <= 1 or any(r.lstrip("+") in ("HEAD", "@") for r in refs)):
-        return "HEAD"
     current = git_rc(where, "branch", "--show-current")[1] if where else ""
     for ref in refs:
         src, colon, dst = ref.lstrip("+").rpartition(":")
@@ -1140,11 +1147,12 @@ def turn_pre(p):
         return False
     cwd = str(p.get("cwd") or "")
     if kind[0] in ("merge", "push"):
-        if kind[-1] is None:      # a cd or -C the watcher cannot follow: the seal may be on over there
-            if os.environ.get("SQUAD_SEAL") != "0" and (not git_dir(cwd) or seal_on(cwd)):
+        if kind[-1] is None:      # a cd or -C the watcher cannot follow: the seal may be on over there,
+            if os.environ.get("SQUAD_SEAL") != "0":     # whatever the session's repository says
                 deny("[squad-watch] MERGE SEAL: the watcher cannot tell which repository this "
                      f"{'push' if kind[0] == 'push' else 'merge'} runs in (a cd or -C to a variable or a quoted "
-                     "path, `cd -`, a subshell, pushd, GIT_DIR or env -C before it), so the seal there cannot be "
+                     "path, `cd -`, a cd that may not run, `builtin cd`, a subshell, pushd, GIT_DIR or env -C "
+                     "before it), so the seal there cannot be "
                      "checked. Run it with a literal path: `cd /path/to/worktree && gh pr merge <number>`, or "
                      "`git -C /path/to/worktree push ...`. " + SEAL_HOW)
                 return True
