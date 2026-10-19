@@ -1,0 +1,10 @@
+{
+  "version": 1, "stack": "backend", "full_suite": true,
+  "review": {"independent": true, "model": "deepseek/deepseek-v4.1-flash-1017", "max_repair_cycles": 2, "max_calls": 3, "max_tokens": 24000, "max_cost_usd": 1, "timeout_seconds": 300},
+  "budget": {"wall_seconds": 900, "cpu_seconds": 1800, "memory_mb": 2048, "artifact_mb": 100, "llm_calls": 0},
+  "steps": [
+    {"id": "static", "kind": "static", "argv": ["python3", "checks/static.py"], "cwd": ".", "needs": [], "assertions": ["No lint or type errors"], "fixtures": [], "services": [], "tools": ["python3"], "evidence": "evidence/static.json", "rollback": "Revert the card commit; keep evidence", "timeout_seconds": 60, "min_tests": 0, "outcomes": ["PASS", "FAIL", "BLOCKED", "TIMEOUT", "ERROR"]},
+    {"id": "unit", "kind": "unit", "argv": ["python3", "checks/unit.py"], "cwd": ".", "needs": ["static"], "assertions": ["All unit assertions pass; no tests removed or weakened"], "fixtures": ["fixtures/unit.json"], "services": [], "tools": ["python3"], "evidence": "evidence/unit.json", "rollback": "Revert the card commit; keep evidence", "timeout_seconds": 300, "min_tests": 1, "outcomes": ["PASS", "FAIL", "BLOCKED", "TIMEOUT", "ERROR"]},
+    {"id": "integration", "kind": "integration", "argv": ["python3", "checks/integration.py"], "cwd": ".", "needs": ["unit"], "assertions": ["API persists and reloads fixture; failed authorization leaves no writes"], "fixtures": ["fixtures/api.json"], "services": ["isolated-postgres"], "tools": ["python3", "postgres"], "evidence": "evidence/integration.json", "rollback": "Drop isolated fixture database; revert card commit", "timeout_seconds": 300, "min_tests": 1, "outcomes": ["PASS", "FAIL", "BLOCKED", "TIMEOUT", "ERROR"]}
+  ]
+}
