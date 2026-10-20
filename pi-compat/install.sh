@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Install only the compatibility shim; never rewrite Claude's source resources.
 set -euo pipefail
+if (( $# )); then
+  printf 'Usage: bash install.sh --pi\n' >&2
+  exit 2
+fi
 source_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 agent_dir=${PI_CODING_AGENT_DIR:-"$HOME/.pi/agent"}
 mkdir -p "$agent_dir/extensions" "$agent_dir/backups"

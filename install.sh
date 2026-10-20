@@ -4,6 +4,11 @@
 set -euo pipefail
 
 SQUAD="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Pi is an isolated opt-in: dispatch before any Claude/OMP setup or CLI probe.
+if [[ "${1:-}" == "--pi" ]]; then
+  shift
+  exec bash "$SQUAD/pi-compat/install.sh" "$@"
+fi
 CLAUDE="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 
 link() {

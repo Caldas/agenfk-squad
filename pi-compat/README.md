@@ -1,14 +1,25 @@
 # Claude resources in Pi
 
-A source-preserving, provider-neutral bridge extending the existing `claude-skills.ts`
-installation. Original Claude plugins, agents, commands, skills and credentials are not
+An optional, source-preserving, provider-neutral bridge for the public squad.
+It also imports existing Claude resources when present, but does not require Claude. Original Claude plugins, agents, commands, skills and credentials are not
 rewritten. The entry point uses Pi's extension API, not Anthropic inference APIs.
 
 ## Install and use
 
+Prerequisites: Node 22+ and a compatible `@earendil-works/pi-coding-agent`
+installation. This port was validated with Pi 0.87.0, Node 22.23.1 and
+TypeScript 5.9.3; run the strict contracts before using other Pi versions.
+AgenFK is required for the squad's board/gate workflow. From the repository root:
+
 ```sh
 bash install.sh --pi
 ```
+
+This mode installs only Pi extension shims and updates Pi's private `swarmRoot`.
+It never invokes the legacy Claude/OMP installer, renders OMP agents, edits their
+configuration, or installs the Claude merge-queue command. The no-argument
+`bash install.sh` retains its existing Claude/OMP behavior. `PI_CODING_AGENT_DIR`
+can select a separate Pi profile; no authentication file is changed.
 
 The installer records this project's `swarmRoot` in Pi's private configuration, so the
 roster, skills and dispatch guidance work without a Claude installation. Use `/swarm`
@@ -38,7 +49,7 @@ worktree settings taking precedence; the root checkout itself is not edited.
 - `web_fetch` / `web_search`: HTTP text retrieval and public Bing RSS search. These are
   alternatives, not Claude's proprietary web tools. No browser sign-ins are inherited.
 - `claude_lsp`: hover, definitions, references and document symbols, with zero-based positions.
-- `/mcp`: normal MCP connection/authentication, including lazily imported host/plugin servers.
+- `/mcp` (with the optional adapter below): normal MCP connection/authentication, including lazily imported host/plugin servers.
   Plugin MCP names are qualified (`plugin__server`) to prevent collisions. Existing Pi MCP
   configuration wins conflicts, including disabled servers. No startup server connection
   is performed by this bridge.
@@ -51,14 +62,16 @@ directories and expand `${CLAUDE_PLUGIN_ROOT}` without moving references or scri
 
 ## Dependencies and boundaries
 
-The installed `pi-mcp-adapter` package provides MCP runtime registration. Remote servers
+MCP runtime registration requires the optional `pi-mcp-adapter` Pi package.
+It is not bundled or installed by `--pi`; install/configure it separately if MCP
+is needed. Agent/skill discovery does not require it. Remote servers
 can require OAuth, environment variables, network access or local executables; discovery
 is not proof that authentication or every tool call works. Use `/mcp` for authoritative
 runtime status. Missing enabled plugin installations remain visible as warnings.
 
 The built-in TypeScript plugin has no on-disk LSP manifest, so its documented
-`typescript-language-server --stdio` mapping is supplied explicitly. For this machine,
-free dependencies were installed privately, without lifecycle scripts:
+`typescript-language-server --stdio` mapping is supplied explicitly. Optional
+language-server/compiler setup, not performed by the installer:
 
 ```sh
 npm install --prefix ~/.pi/agent/claude-compat/tools --ignore-scripts \
@@ -100,7 +113,7 @@ approval, or through explicit global opt-in in `~/.pi/agent/claude-compat.json`:
 
 Only enabled imported `PreToolUse` hooks are automatically attached to Pi tool execution;
 other imported lifecycle hooks can be invoked explicitly. The native Pi supervisor is
-separate from this legacy-hook catalog; disabled `squad-vigia.py` entries do not mean
+separate from this legacy-hook catalog; disabled legacy watcher entries do not mean
 the native supervisor is disabled. Inspect `/squad-status` for its authoritative status. Async/rewake/conditional, prompt and agent
 hooks are catalogued as unsupported, not silently converted. In particular, legacy hooks
 reading Claude-specific transcript/state formats or launching paid Claude SDK reviews are
@@ -123,9 +136,29 @@ preserved. This does not launch the Claude CLI to obtain a quota.
 
 ## Validation
 
+From the repository root, require the Pi runtime rather than silently skipping its contracts:
+
 ```sh
-PYTHONDONTWRITEBYTECODE=1 python3 tests/test_pi_compat.py
+PI_COMPAT_REQUIRE=1 PYTHONDONTWRITEBYTECODE=1 python3 tests/test_pi_compat.py
+PYTHONDONTWRITEBYTECODE=1 python3 tests/test_pi_install.py
 ```
+
+For nonstandard installations, set `PI_COMPAT_PI_ROOT` to the directory containing
+Pi's `package.json`. An explicit invalid path is an error. Without Pi, the default
+Python suite reports these runtime contracts as skipped; `PI_COMPAT_REQUIRE=1`
+makes that absence fatal. Installer tests require only Bash and Python.
+The existing CI workflow is unchanged and does not yet run these optional Pi checks.
+
+Optional strict TypeScript check (no downloads; requires TypeScript installed separately):
+
+```sh
+export PI_COMPAT_PI_ROOT="$(npm root -g)/@earendil-works/pi-coding-agent"
+node pi-compat/typecheck.mjs
+```
+
+`PI_COMPAT_TSC` can point to the compiler JS entry point when it is not locally
+resolvable. The checker creates and removes a temporary configuration; it does not
+modify this checkout or install packages.
 
 The Python entry point runs the Node contract suite using the installed Pi package's loader.
 It verifies trust boundaries, worktree precedence, symlinks/cycles, disabled plugins,
@@ -134,8 +167,9 @@ mirrors, secret-free catalogs, process failures/cancellation/deadlines, tool all
 lists, CLI gate forwarding, hook injection/overflow, real local HTTP, RSS parsing, and LSP
 framing/file containment. No provider requests are made by these contract tests.
 
-Real provider, MCP and language-server smoke-test results are recorded separately; tests
-using a fake child/provider are never represented as cross-model live validation.
+Provider, authenticated MCP and language-server acceptance are separate, optional
+checks. This port does not claim live cross-model validation: local fixture children,
+quota responses and RPC providers are not real subscription/provider acceptance.
 
 ## Rollback
 

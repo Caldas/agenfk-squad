@@ -182,6 +182,21 @@ Then open a project that has an AgenFK board and ask for something:
 [squad route] product -> `product` agent (real state of the repo, smallest increment, cards in AgenFK).
 ```
 
+### Pi alternative (opt-in)
+
+With Node 22+ and Pi installed, use `bash install.sh --pi` instead of the
+Claude quickstart above. This installs only Pi shims: no Claude/OMP settings,
+agent files, lifecycle hooks or merge-queue command are changed. A Claude
+installation is not required; agents and skills load from this checkout.
+
+In Pi, run `/reload`, `/claude-compat` and `/squad-status`. Use
+`/swarm <agent> <card and task>` for real delegation with the selected Pi model.
+The native supervisor adds dispatch/loop limits, verified handoff/pickup and
+idle pre-cache compaction only when cache lifetime and usage are known.
+Keep the source checkout: installed shims import it directly. See the
+[Pi bridge guide](pi-compat/README.md) for dependencies, boundaries, tests and rollback.
+The existing no-argument installer and OMP adapter remain unchanged.
+
 ## Documentation
 
 | Read this | To learn |
@@ -194,6 +209,8 @@ Then open a project that has an AgenFK board and ask for something:
 | [docs/configuration.md](docs/configuration.md) | Every `SQUAD_*` variable and its default |
 | [docs/installation.md](docs/installation.md) | Requirements, what the installer links, the `settings.json` hooks, uninstalling |
 | [docs/external-contributor-agent.md](docs/external-contributor-agent.md) | Copy-paste onboarding protocol for external Claude Code and other coding agents |
+| [pi-compat/README.md](pi-compat/README.md) | Pi-only installation, resources, tools, quota widget, validation and rollback |
+| [pi-compat/VIGIA.md](pi-compat/VIGIA.md) | Native Pi supervision, verified session pickup and safe idle pre-cache compaction |
 | [ROADMAP.md](ROADMAP.md) | What is missing, and where help is most useful |
 
 ## Skills
@@ -239,8 +256,10 @@ This is the working setup of one person, published as it is. It runs daily on
 Linux with Claude Code. The automatic session switch depends on the
 [herdr](docs/installation.md#optional-dependencies) pane manager; without it the watcher still
 orders the handoff and you type `/clear` and `/clear-pickup pickup` yourself.
-The session report reads Codex, pi and oh-my-pi transcripts too, but the hooks
-only drive Claude Code. [ROADMAP.md](ROADMAP.md) lists what that leaves open.
+The session report also reads Codex, Pi and oh-my-pi transcripts. The legacy
+session-switch hooks remain Claude-specific. Pi now has the opt-in native
+supervisor above; it does not use herdr or port the Claude merge queue.
+Existing OMP support is preserved. [ROADMAP.md](ROADMAP.md) lists remaining work.
 
 ## Contributing
 

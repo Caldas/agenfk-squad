@@ -23,20 +23,25 @@ In each existing Pi session, wait for its current task to finish, then run:
 New sessions load the installed bridge automatically. Existing sessions do not acquire
 new handlers until reloaded. Installation does not inject commands into other terminals,
 restart their jobs, or change Claude settings. Keep the installed source worktree:
-the shim imports it directly. `/claude-compat` lists resources and legacy hook status;
+the shim imports it directly. No Claude installation is required. Public English roles
+(`product`, `developer`, `tester`, `verifier`, `finance`, `gtm`, `context`) and the
+shared roles (`github`, `frontend`, `infra`, `finops`) are discovered from this repository.
+Routing also recognizes Portuguese input and legacy role aliases. Project-specific
+`*-verifier`, `*-developer` and similar roles override packaged defaults; unrelated
+`code-reviewer` roles do not replace the independent verification gate. `/claude-compat` lists resources and legacy hook status;
 `/squad-status` reports the separate native Pi supervisor, its limits and current state.
 
 ## Native controls
 
 - The context window is the selected model's real window, not a fixed one-million-token
-  assumption. Default warning: 70%; parent handoff order: 90%. A child receives a return
+  assumption. Default warning: 70%; parent handoff order: 80%. A child receives a return
   instruction at `min(180000 tokens, 80% of its window)`, not a session replacement.
   The cockpit's visual thresholds are independent; its earlier blink is not itself an
   order to stop.
 - Active sessions are checked on tool completion and every minute. A handoff order
   enters model context, not just the UI. An ignored order gets at most one final-boundary
   continuation per user run; errors and aborts are not restarted by that reminder.
-- Limits: 60 dispatches per session, 4 concurrent children, 6 concurrent Pi orchestrators,
+- Limits: 40 dispatches per session, 4 concurrent children, 3 concurrent Pi orchestrators,
   and 6 review dispatches per card across Pi sessions. Reviews need the card UUID.
   A short atomic reservation coordinates parent processes. Cancellation/completion
   releases its live reservation; dead processes do not consume live slots.
@@ -101,7 +106,8 @@ Native warming takes priority when it already intends to refresh an idle cache. 
 supervisor does not change the user's warming setting; it prevents a duplicate warm
 request only while its own compaction is running. One native compaction attempt is made
 per eligible request, without a supervisor retry loop. Pi may use separate history and
-turn-prefix summary calls inside that attempt. Native usage/cost accounting remains intact.
+turn-prefix summary calls inside that attempt. These can be billable model requests;
+cache discounts or net savings are not guaranteed. Native usage/cost accounting remains intact.
 
 The preservation instruction names the owner's latest request, card, branch/worktree/PR,
 decisions, constraints, executed evidence, done/pending work, next step and live jobs.
@@ -121,10 +127,10 @@ Only Pi configuration is used. Optional settings in `~/.pi/agent/claude-compat.j
   "vigia": {
     "enabled": true,
     "preparePercent": 70,
-    "handoffPercent": 90,
-    "maxDispatches": 60,
+    "handoffPercent": 80,
+    "maxDispatches": 40,
     "maxChildren": 4,
-    "maxOrchestrators": 6,
+    "maxOrchestrators": 3,
     "maxReviews": 6,
     "autoPickup": true,
     "preCache": {
