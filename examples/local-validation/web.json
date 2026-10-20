@@ -1,0 +1,12 @@
+{
+ "version":1,"stack":"web","full_suite":true,
+ "review":{"independent":true,"model":"deepseek/deepseek-v4.1-flash-1017","max_repair_cycles":2,"max_calls":3,"max_tokens":24000,"max_cost_usd":1,"timeout_seconds":300},
+ "budget":{"wall_seconds":900,"cpu_seconds":1800,"memory_mb":2048,"artifact_mb":100,"llm_calls":0},
+ "steps":[
+ {"id":"static","kind":"static","argv":["node","checks/static.mjs"],"cwd":".","needs":[],"assertions":["No lint errors"],"fixtures":[],"services":[],"tools":["node"],"evidence":"evidence/static.json","rollback":"Revert card commit","timeout_seconds":60,"min_tests":0,"outcomes":["PASS","FAIL","BLOCKED","TIMEOUT","ERROR"]},
+ {"id":"unit","kind":"unit","argv":["node","checks/unit.mjs"],"cwd":".","needs":["static"],"assertions":["All unit assertions pass"],"fixtures":[],"services":[],"tools":["node"],"evidence":"evidence/unit.json","rollback":"Revert card commit","timeout_seconds":120,"min_tests":1,"outcomes":["PASS","FAIL","BLOCKED","TIMEOUT","ERROR"]},
+ {"id":"integration","kind":"integration","argv":["node","checks/integration.mjs"],"cwd":".","needs":["unit"],"assertions":["API persists fixture and rejects unauthorized writes"],"fixtures":["fixtures/api.json"],"services":["isolated-api"],"tools":["node"],"evidence":"evidence/integration.json","rollback":"Delete isolated service state","timeout_seconds":120,"min_tests":1,"outcomes":["PASS","FAIL","BLOCKED","TIMEOUT","ERROR"]},
+ {"id":"journey","kind":"ui","argv":["node","checks/journey.mjs"],"cwd":".","needs":["integration"],"assertions":["Submit form and reload persisted result; attach video to report"],"fixtures":["fixtures/user.json"],"services":["isolated-web"],"tools":["node","pinned-playwright-chromium"],"evidence":"evidence/journey.json","rollback":"Delete isolated user and stop service","timeout_seconds":180,"min_tests":1,"outcomes":["PASS","FAIL","BLOCKED","TIMEOUT","ERROR"]},
+ {"id":"recording","kind":"recording","argv":["node","checks/validate-recording.mjs","evidence/journey.json"],"cwd":".","needs":["journey"],"assertions":["Validate existing journey report video hash, duration and nonempty frames; do not rerun journey"],"fixtures":["evidence/journey.json"],"services":[],"tools":["node","ffprobe"],"evidence":"evidence/recording.json","rollback":"Retain original artifacts; revert card commit","timeout_seconds":30,"min_tests":0,"outcomes":["PASS","FAIL","BLOCKED","TIMEOUT","ERROR"]}
+ ]
+}
