@@ -289,7 +289,7 @@ export default function usageDashboard(pi: ExtensionAPI) {
     try {
       const resolved = await ctx.modelRegistry.getProviderAuth("openrouter");
       const token = resolved?.auth.apiKey ?? resolved?.auth.headers?.Authorization?.replace(/^Bearer\s+/i, "");
-      if (!token) throw new Error("chave OpenRouter indisponível");
+      if (!token) throw new Error("OpenRouter key unavailable");
       const get = async (endpoint: string, apiKey: string) => {
         const response = await fetch(`https://openrouter.ai/api/v1/${endpoint}`, {
           headers: { Authorization: `Bearer ${apiKey}` }, signal: AbortSignal.timeout(10000),
@@ -303,15 +303,15 @@ export default function usageDashboard(pi: ExtensionAPI) {
       if (managementKey) {
         try {
           orCredits = parseOpenRouterCredits(await get("credits", managementKey));
-          if (!orCredits) orCreditsError = "resposta de créditos sem valores válidos";
+          if (!orCredits) orCreditsError = "credit response has no valid values";
         } catch (error) {
-          orCreditsError = error instanceof Error ? error.message : "créditos indisponíveis";
+          orCreditsError = error instanceof Error ? error.message : "credits unavailable";
         }
       }
       orState = "ready";
     } catch (error) {
       orState = "error";
-      orError = error instanceof Error ? error.message : "consulta indisponível";
+      orError = error instanceof Error ? error.message : "request unavailable";
     } finally {
       orCheckedAt = Date.now();
       orRefreshing = false;
@@ -340,8 +340,8 @@ export default function usageDashboard(pi: ExtensionAPI) {
     const alert = level === "handoff" || level === "critical";
     if (level !== lastAlert && (alert || level === "prepare")) {
       currentCtx.ui.notify(level === "prepare"
-        ? "Contexto: prepare o handoff (ex.: /skill:clear-pickup handoff) antes de iniciar outra etapa."
-        : "Hora do handoff: rode /skill:clear-pickup handoff, depois /new. Nenhuma sessão será limpa automaticamente.", "warning");
+        ? "Context: prepare next-step notes. This warning is informational; wait for a supervisor order or owner request before handoff."
+        : "High context: check /squad-status; use squad_handoff only after a supervisor order or owner request. The cockpit never replaces sessions.", "warning");
     }
     if (alert && monitor.blink) blinkPhase = !blinkPhase;
     else blinkPhase = true;
@@ -599,16 +599,16 @@ export default function usageDashboard(pi: ExtensionAPI) {
           ]);
           const costs = getOrCosts(ctx);
           const balance = orCredits ?? orKeyInfo?.balance;
-          const balanceLabel = orCredits ? "Saldo conta" : "Limite chave";
+          const balanceLabel = orCredits ? "Account credits" : "Key limit";
           const orLines = costs.requests || model?.provider === "openrouter" || orState !== "missing"
             ? wrapSegments([
-                theme.fg("accent", `OR sessão~ ${usd(costs.session)}`),
+                theme.fg("accent", `OR session~ ${usd(costs.session)}`),
                 theme.fg("dim", `Task~ ${usd(costs.task)}`),
                 theme.fg("dim", `Releitura~ ${usd(costs.cacheRead)} (task ${usd(costs.taskCacheRead)})`),
                 balance
                   ? theme.fg(balance.remaining <= 0 ? "error" : "success", `${balanceLabel} ${usd(balance.remaining)}`) +
                     (balance.usedPercent != null ? ` ${colouredGauge(balance.usedPercent)} ${balance.usedPercent.toFixed(0)}% usado` : "")
-                  : theme.fg("dim", orState === "loading" ? "Saldo …" : orState === "error" ? "Saldo indisponível" : orKeyInfo?.unlimited ? "Chave sem limite · saldo conta N/A" : "Saldo N/A"),
+                  : theme.fg("dim", orState === "loading" ? "Balance …" : orState === "error" ? "Balance unavailable" : orKeyInfo?.unlimited ? "Unlimited key · account credits N/A" : "Balance N/A"),
                 orCredits && orKeyInfo?.balance ? theme.fg("dim", `Limite chave ${usd(orKeyInfo.balance.remaining)}`) : "",
               ]) : [];
           const line1 = fitSegments([modelPart, provider, branch ? theme.fg("dim", `git:${branch}`) : ""], width, separator);
@@ -630,7 +630,7 @@ export default function usageDashboard(pi: ExtensionAPI) {
       monitor = monitorConfig(JSON.parse(readFileSync(MONITOR_CONFIG, "utf8")));
     } catch (error) {
       monitor = monitorConfig(undefined);
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") ctx.ui.notify(`Cockpit: configuração inválida em ${MONITOR_CONFIG}; usando padrões.`, "warning");
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") ctx.ui.notify(`Cockpit: invalid configuration in ${MONITOR_CONFIG}; using defaults.`, "warning");
     }
     agentActive = !ctx.isIdle();
     runningTools.clear();
@@ -738,13 +738,13 @@ export default function usageDashboard(pi: ExtensionAPI) {
         : `idle${ctx.hasPendingMessages() ? " (queued input)" : ""}`;
       ctx.ui.notify(
         `Context: ${usage?.tokens ?? "?"}/${usage?.contextWindow ?? ctx.model?.contextWindow ?? "?"} tokens; handoff: ${getLevel(ctx)}.\n` +
-        `Cache hit (última resposta): ${stats.hitPercent?.toFixed(1) ?? "N/A"}%; Cache R: ${stats.latestCacheRead}/req, ${stats.cacheRead} acumulados; Cache W: ${stats.cacheWrite}.\n` +
-        `Reproc~: ${Math.round(stats.reprocessedEstimate)} tokens (~${stats.reprocessedPercent?.toFixed(1) ?? "N/A"}% das entradas comparáveis; ${stats.comparableRequests} pares).\n` +
-        `Estimativa = max(0, min(prompt anterior, atual) − cacheRead), no mesmo modelo e sem atravessar compactação. Não comprova desperdício.\n` +
-        `Cache reutilizado não é desperdício; 0 pode significar ausência de cache ou de telemetria do provedor. ` +
-        `Custo Cache R registrado: ${stats.cacheReadCost > 0 ? `$${stats.cacheReadCost.toFixed(4)} (estimativa do provedor, não fatura)` : "N/A ou zero informado"}.\n` +
-        `Totais: ${stats.requests} respostas principais do ramo ativo; sem ferramentas/modelos aninhados e resumos.\n` +
-        `Alertas: preparar ${monitor.warningPercent}%, handoff ${monitor.handoffPercent}% (ou reserva ≤${monitor.reserveTokens}, limitada a 25% da janela), crítico ${monitor.criticalPercent}%; blink ${monitor.blink ? "on" : "off"}.\n` +
+        `Cache hit (latest response): ${stats.hitPercent?.toFixed(1) ?? "N/A"}%; Cache R: ${stats.latestCacheRead}/req, ${stats.cacheRead} cumulative; Cache W: ${stats.cacheWrite}.\n` +
+        `Reproc~: ${Math.round(stats.reprocessedEstimate)} tokens (~${stats.reprocessedPercent?.toFixed(1) ?? "N/A"}% of comparable inputs; ${stats.comparableRequests} pairs).\n` +
+        `Estimate = max(0, min(previous prompt, current prompt) − cacheRead), for the same model without crossing compaction. This does not prove waste.\n` +
+        `Reused cache is not waste; 0 may mean no cache or no provider telemetry. ` +
+        `Recorded Cache R cost: ${stats.cacheReadCost > 0 ? `$${stats.cacheReadCost.toFixed(4)} (provider estimate, not an invoice)` : "N/A or reported zero"}.\n` +
+        `Totals: ${stats.requests} top-level responses in the active branch; nested tools/models and summaries excluded.\n` +
+        `Visual alerts: prepare ${monitor.warningPercent}%, handoff ${monitor.handoffPercent}% (or reserve ≤${monitor.reserveTokens}, capped at 25% of the window), critical ${monitor.criticalPercent}%; blink ${monitor.blink ? "on" : "off"}.\n` +
         `5h: ${quotaText(fiveHour)}; weekly: ${quotaText(weekly)}; ` +
         `provider: ${providerLabel(ctx)} (${providerHealth}); AWS: ${awsIdentity}; activity: ${activity}; inactive MCPs: ${inactive}`,
         mcp.inactive.length || providerHealth === "error" || providerHealth === "missing" ? "warning" : "info",
@@ -759,13 +759,13 @@ export default function usageDashboard(pi: ExtensionAPI) {
       const costs = getOrCosts(ctx);
       const key = orKeyInfo?.balance;
       ctx.ui.notify(
-        `OpenRouter · USD\nSessão~ ${usd(costs.session)}; task atual~ ${usd(costs.task)}.\n` +
-        `Releitura de cache~ ${usd(costs.cacheRead)} (task~ ${usd(costs.taskCacheRead)}), já incluída nos totais, não somar novamente.\n` +
-        `Limite restante da chave: ${key ? usd(key.remaining) : orKeyInfo?.unlimited ? "sem limite configurado (não é saldo infinito)" : "N/A"}.\n` +
-        `Saldo da conta: ${orCredits ? usd(orCredits.remaining) : `N/A${orCreditsError ? ` (${orCreditsError})` : "; /credits exige management key via OPENROUTER_MANAGEMENT_KEY"}`}.\n` +
-        `Consulta: ${orCheckedAt ? new Date(orCheckedAt).toLocaleTimeString() : "não realizada"}${orError ? `; ${orError}` : ""}; atualização automática a cada 10 min ou /dashboard-costs.\n` +
-        `~ = custos registrados pelo Pi, estimados, não fatura conciliada. Sessão inclui todos os ramos; task = desde a última mensagem do usuário no ramo ativo.\n` +
-        `Só respostas principais OpenRouter; chamadas aninhadas/resumos sem identificação do provedor não entram. Forks incluem o histórico copiado. Cache pago não implica desperdício.`,
+        `OpenRouter · USD\nSession~ ${usd(costs.session)}; current task~ ${usd(costs.task)}.\n` +
+        `Cache read~ ${usd(costs.cacheRead)} (task~ ${usd(costs.taskCacheRead)}), already included in totals; do not add again.\n` +
+        `Remaining key limit: ${key ? usd(key.remaining) : orKeyInfo?.unlimited ? "no configured limit (not infinite balance)" : "N/A"}.\n` +
+        `Account credits: ${orCredits ? usd(orCredits.remaining) : `N/A${orCreditsError ? ` (${orCreditsError})` : "; /credits requires a management key via OPENROUTER_MANAGEMENT_KEY"}`}.\n` +
+        `Checked: ${orCheckedAt ? new Date(orCheckedAt).toLocaleTimeString() : "not yet"}${orError ? `; ${orError}` : ""}; refreshes every 10 min or with /dashboard-costs.\n` +
+        `~ = Pi-recorded estimates, not a reconciled invoice. Session includes all branches; task = since the latest user message in the active branch.\n` +
+        `Only top-level OpenRouter responses; nested calls/summaries without provider identity are excluded. Forks include copied history. Paid cache does not imply waste.`,
         orState === "error" ? "warning" : "info",
       );
     },
@@ -776,7 +776,7 @@ export default function usageDashboard(pi: ExtensionAPI) {
     handler: async (args, ctx) => {
       const value = args.trim();
       if (value !== "on" && value !== "off") {
-        ctx.ui.notify("Use /dashboard-blink on ou /dashboard-blink off", "info");
+        ctx.ui.notify("Use /dashboard-blink on or /dashboard-blink off", "info");
         return;
       }
       // Preserve any newer configuration edited by another session.
@@ -788,7 +788,7 @@ export default function usageDashboard(pi: ExtensionAPI) {
       monitor = next;
       blinkPhase = true;
       repaint();
-      ctx.ui.notify(`Blink ${value}; alerta textual permanece ativo.`, "info");
+      ctx.ui.notify(`Blink ${value}; the text alert remains active.`, "info");
     },
   });
 

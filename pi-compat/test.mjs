@@ -235,13 +235,13 @@ test('project guidance loads only after trust, in canonical then worktree order'
  assert.equal(r.discover(work,true,f.home).guidance.length,1);
 });
 test('native router handles accents, project specialists, skill provenance and bounded hints',t=>{
- const f=setup(t); write(path.join(f.home,'.claude/agents/verificador.md'),'---\nname: verificador\ndescription: Default\n---\nDefault'); write(path.join(f.cwd,'.claude/agents/sv-verifier.md'),'---\nname: sv-verifier\ndescription: Specialist\n---\nSpecialist');
+ const f=setup(t); write(path.join(f.home,'.claude/agents/verificador.md'),'---\nname: verificador\ndescription: Default\n---\nDefault'); write(path.join(f.cwd,'.claude/agents/project-verifier.md'),'---\nname: project-verifier\ndescription: Specialist\n---\nSpecialist');
  skill(path.join(f.cwd,'.claude/skills/escrita/SKILL.md'),'escrita'); const i=r.discover(f.cwd,true,f.home);
- assert(routing.routePrompt('Preciso de revisão independente',i).includes('sv-verifier'));
+ assert(routing.routePrompt('Preciso de revisão independente',i).includes('project-verifier'));
  assert(routing.routePrompt('modo enxuto',i).includes(path.join(f.cwd,'.claude/skills/escrita/SKILL.md')));
  assert.equal(routing.routePrompt('/swarm reviewer revisão independente',i),undefined); assert.equal(routing.routePrompt('olá',i),undefined);
  assert.equal(routing.routePrompt('terraform',i),undefined);
- assert(!routing.routePrompt('revisão independente',r.discover(f.cwd,false,f.home)).includes('sv-verifier'));
+ assert(!routing.routePrompt('revisão independente',r.discover(f.cwd,false,f.home)).includes('project-verifier'));
 });
 test('before_agent_start injects project rules and native routing without executing hooks',t=>{
  const root=fixture(t), ad=path.join(root,'ad'), swarm=path.join(root,'swarm'); write(path.join(ad,'claude-compat.json'),{swarmRoot:swarm}); write(path.join(swarm,'agents/infra.md'),'---\nname: infra\ndescription: Infra\n---\nInfra rules'); write(path.join(root,'.claude/CLAUDE.md'),'PROJECT_SENTINEL');
@@ -249,7 +249,7 @@ test('before_agent_start injects project rules and native routing without execut
  try { const handlers=new Map(); ix.default({on:(n,h)=>handlers.set(n,h),registerTool(){},registerCommand(){},events:{emit(){}}});
  const ctx={cwd:root,isProjectTrusted:()=>true,model:{provider:'fixture',id:'model'}};
  handlers.get('resources_discover')({cwd:root},ctx);
- const out=handlers.get('before_agent_start')({systemPrompt:'BASE',prompt:'terraform',systemPromptOptions:{contextFiles:[]}},ctx); assert(out.systemPrompt.includes('PROJECT_SENTINEL')); assert(out.message.content.includes('agente infra'));
+ const out=handlers.get('before_agent_start')({systemPrompt:'BASE',prompt:'terraform',systemPromptOptions:{contextFiles:[]}},ctx); assert(out.systemPrompt.includes('PROJECT_SENTINEL')); assert(out.message.content.includes('agent infra'));
  const dedup=handlers.get('before_agent_start')({systemPrompt:'ALREADY_LOADED',prompt:'olá',systemPromptOptions:{contextFiles:[{path:path.join(root,'.claude/CLAUDE.md')}]}},ctx); assert(!dedup.systemPrompt.includes('PROJECT_SENTINEL')); assert.equal(dedup.message,undefined);
  } finally { if(old===undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR=old; }
 });
@@ -263,10 +263,27 @@ test('router prefers project skills and respects the winning manual-only declara
 test('router prefers a worktree specialist over the canonical generic role',t=>{
  const f=setup(t), main=path.join(f.root,'main'), work=path.join(f.root,'work'); fs.mkdirSync(main);
  const git=(...args)=>execFileSync('git',args,{cwd:main,stdio:'ignore'}); git('init'); git('-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','--allow-empty','-m','fixture'); git('worktree','add','-b','work',work);
- write(path.join(main,'.claude/agents/verificador.md'),'---\nname: verificador\ndescription: Canonical generic\n---\nRules'); write(path.join(work,'.claude/agents/sv-verifier.md'),'---\nname: sv-verifier\ndescription: Worktree specialist\n---\nRules');
+ write(path.join(main,'.claude/agents/verificador.md'),'---\nname: verificador\ndescription: Canonical generic\n---\nRules'); write(path.join(work,'.claude/agents/project-verifier.md'),'---\nname: project-verifier\ndescription: Worktree specialist\n---\nRules');
  write(path.join(work,'.claude/agents/code-reviewer.md'),'---\nname: code-reviewer\ndescription: Not the verification gate\n---\nRules');
  write(path.join(work,'.claude/agents/verificador.md'),'---\nname: verificador\ndescription: Generic\n---\nRules');
- assert(routing.routePrompt('revisão independente',r.discover(work,true,f.home)).includes('sv-verifier'));
+ assert(routing.routePrompt('revisão independente',r.discover(work,true,f.home)).includes('project-verifier'));
+});
+test('standalone public squad routes English roles and packaged skills without a private global install',t=>{
+ const f=setup(t), swarm=path.join(f.root,'public-squad');fs.rmSync(path.join(f.home,'.claude'),{recursive:true,force:true});
+ for(const role of ['product','developer','verifier','tester','finance','gtm','context','github','frontend','infra','finops']) write(path.join(swarm,'agents',role+'.md'),'---\nname: '+role+'\ndescription: Public role\n---\nRules');
+ for(const name of ['design-reference','pr-evidence']) skill(path.join(swarm,'skills',name,'SKILL.md'),name);
+ const i=r.discover(f.cwd,true,f.home,swarm);
+ for(const [prompt,role] of [['Prioritize the epic','product'],['Implement the backend feature','developer'],['Independent review','verifier'],['Write tests','tester'],['Pricing and margins','finance'],['Find competitors and ideal customer','gtm'],['Resume work from handoff','context'],['Open a pull request','github'],['Design a screen','frontend'],['Terraform infrastructure','infra'],['Monthly cloud cost','finops']]) assert(routing.routePrompt(prompt,i)?.includes('agent '+role+' '),prompt);
+ assert(routing.routePrompt('Design a screen',i).includes('skill design-reference: read '));
+ assert(routing.routePrompt('Review this PR',i).includes('skill pr-evidence: read '));
+ assert.equal(routing.routePrompt('/swarm developer independent review',i),undefined);
+});
+test('repository public roles are discoverable from a clean-home standalone install',t=>{
+ const f=setup(t);fs.rmSync(path.join(f.home,'.claude'),{recursive:true,force:true});
+ const i=r.discover(f.cwd,true,f.home,path.dirname(dir));
+ for(const role of ['product','developer','verifier','tester','finance','gtm','context','github','frontend','infra','finops']) assert(i.resources.some(resource=>resource.kind==='agent'&&resource.name===role),role);
+ assert(routing.routePrompt('Independent review',i).includes('agent verifier (real subagent)'));
+ assert(routing.routePrompt('Design a screen',i).includes('skill design-reference: read '));
 });
 test('extension registers model-neutral tools and command entry points',()=>{
  const tools=new Map(), commands=new Map(), events=new Map(); const pi={registerTool:t=>tools.set(t.name,t),registerCommand:(n,c)=>commands.set(n,c),on:(n,h)=>events.set(n,h),events:{emit(){}},getActiveTools:()=>['read','bash']};

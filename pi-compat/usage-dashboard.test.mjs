@@ -173,12 +173,13 @@ test('TUI gauges reflow at narrow widths, blink while idle, and stop after shutd
       assert.ok(lines.every(line => visibleWidth(line) <= width), `width ${width}`);
       assert.ok(lines.some(line => line.includes('HANDOFF')));
       assert.ok(lines.some(line => line.includes('Cache hit')));
-      assert.ok(lines.some(line => line.includes('OR sessão~')));
+      assert.ok(lines.some(line => line.includes('OR session~')));
     }
     const first = h.component.render(120)[0];
     await new Promise(resolve => setTimeout(resolve, 1100));
     assert.notEqual(h.component.render(120)[0], first, 'blink changes without input');
-    assert.equal(h.notifications.filter(n => n.text.startsWith('Hora do handoff')).length, 1);
+    assert.equal(h.notifications.filter(n => n.text.startsWith('High context')).length, 1);
+    assert.ok(h.notifications.every(n => !n.text.includes('/new') && !n.text.includes('/clear')), 'visual warnings never instruct destructive session replacement');
     h.setPercent(null);
     assert.ok(h.component.render(120).some(line => line.includes('Ctx N/A')));
     h.setPercent(5);
@@ -212,12 +213,12 @@ test('OpenRouter balance uses /key; no credits request without management key; H
   try {
     await h.commands.get('dashboard-costs').handler('', h.ctx);
     assert.deepEqual(urls, ['https://openrouter.ai/api/v1/key']);
-    assert.match(h.notifications.at(-1).text, /Limite restante da chave: \$8\.00/);
-    assert.match(h.notifications.at(-1).text, /Saldo da conta: N\/A/);
+    assert.match(h.notifications.at(-1).text, /Remaining key limit: \$8\.00/);
+    assert.match(h.notifications.at(-1).text, /Account credits: N\/A/);
     fail = true;
     await h.commands.get('dashboard-costs').handler('', h.ctx);
     assert.match(h.notifications.at(-1).text, /HTTP 401/);
-    assert.doesNotMatch(h.notifications.at(-1).text, /Limite restante da chave: \$8/);
+    assert.doesNotMatch(h.notifications.at(-1).text, /Remaining key limit: \$8/);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalKey === undefined) delete process.env.OPENROUTER_MANAGEMENT_KEY;
