@@ -30,7 +30,7 @@ def run(h, event, sid, transcript, extra=None, env=None):
     p = {"hook_event_name": event, "session_id": sid, "transcript_path": transcript,
          "tool_name": "Bash", "tool_input": {"command": "ls"}, "cwd": h}
     p.update(extra or {})
-    e = dict(os.environ, HOME=h)
+    e = dict(os.environ, HOME=h, USERPROFILE=h)
     for key in list(e):
         if key.startswith("SQUAD_") or key.startswith("HERDR_"):
             del e[key]
@@ -226,6 +226,10 @@ elif a[:2] == ["agent", "prompt"]:
         open({cur!r}, "w").write("ffffffff-9999")
 """)
     os.chmod(path, os.stat(path).st_mode | stat.S_IXUSR)
+    if os.name == "nt":                  # a shebang does not run on Windows: a .cmd that calls the script does
+        with open(path + ".cmd", "w") as fh:
+            fh.write(f'@"{sys.executable}" "{path}" %*\r\n')
+        path += ".cmd"
     return path, sent
 
 
@@ -437,6 +441,11 @@ import sys
 print("77" if "number" in sys.argv else open({state_file!r}).read())
 """)
     os.chmod(gh, os.stat(gh).st_mode | stat.S_IXUSR)
+    if os.name == "nt":                  # a shebang does not run on Windows: a .cmd that calls the script does
+        launcher = gh + ".cmd"
+        with open(launcher, "w") as fh:
+            fh.write(f'@"{sys.executable}" "{gh}" %*\r\n')
+        gh = launcher
     return repo, {"SQUAD_GH": gh}, state_file
 
 

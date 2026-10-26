@@ -70,7 +70,7 @@ def run_driver(tmp):
     driver = os.path.join(tmp, "driver.mjs")
     with open(driver, "w") as fh:
         fh.write(DRIVER.replace("__EXT__", "file://" + ext))
-    env = dict(os.environ, HOME=tmp, RECEIVED=os.path.join(tmp, "received.jsonl"),
+    env = dict(os.environ, HOME=tmp, USERPROFILE=tmp, RECEIVED=os.path.join(tmp, "received.jsonl"),
                SQUAD_WATCH_OMP_BRIDGE=os.path.join(tmp, "fake_bridge.py"),
                # the inherited pi session: the sessionManager must win over it
                PI_SESSION_FILE=os.path.join(tmp, "2026-10-13T20-00-00-000Z_sess-1.jsonl"),
@@ -132,11 +132,32 @@ def test_a_missing_session_file_decides_nothing():
   console.log(JSON.stringify({ v, ran }));
 })();
 '''.replace("__EXT__", ext))
-        env = dict(os.environ, HOME=tmp, RECEIVED=os.path.join(tmp, "received.jsonl"))
+        env = dict(os.environ, HOME=tmp, USERPROFILE=tmp, RECEIVED=os.path.join(tmp, "received.jsonl"))
         r = subprocess.run(["node", driver], capture_output=True, text=True, env=env)
         assert r.returncode == 0, r.stderr
         out = json.loads(r.stdout)
         assert out["v"] == {} and out["ran"] == [], out
+
+
+def test_the_bridge_runs_under_an_interpreter_the_platform_has():
+    # `python3` is the Microsoft Store stub on a stock Windows; `python` is the real one
+    with tempfile.TemporaryDirectory() as tmp:
+        ext = EXT.replace("\\", "\\\\")
+        driver = os.path.join(tmp, "driver3.mjs")
+        with open(driver, "w") as fh:
+            fh.write('''(async () => {
+  const mod = await import("file://__EXT__");
+  console.log(JSON.stringify([
+    mod.pythonCommand({}, "win32"),
+    mod.pythonCommand({}, "linux"),
+    mod.pythonCommand({}, "darwin"),
+    mod.pythonCommand({ SQUAD_PYTHON: "py" }, "win32"),
+  ]));
+})();
+'''.replace("__EXT__", ext))
+        r = subprocess.run(["node", driver], capture_output=True, text=True, env=dict(os.environ, HOME=tmp, USERPROFILE=tmp))
+        assert r.returncode == 0, r.stderr
+        assert json.loads(r.stdout) == ["python", "python3", "python3", "py"], r.stdout
 
 
 if __name__ == "__main__":

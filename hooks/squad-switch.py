@@ -19,6 +19,7 @@ Every step goes to ~/.claude/squad/switches.log. Any doubt = give up: the
 handoff is already written and the owner does the switch by hand.
 """
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -57,6 +58,18 @@ def agent(pane):
 
 
 COPIES = os.path.join(os.path.expanduser("~"), ".claude", "squad", "handoffs")
+WINDOWS = os.name == "nt"
+NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)         # Windows has no such flag: the link is refused by hand below
+BINARY = getattr(os, "O_BINARY", 0)
+
+
+def handoff_ok(path):
+    """The very rule squad-watch applies to the path of a handoff: one place, one rule."""
+    here = os.path.dirname(os.path.realpath(__file__))
+    spec = importlib.util.spec_from_file_location("squad_watch", os.path.join(here, "squad-watch.py"))
+    watch = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(watch)
+    return watch.handoff_path_ok(path)
 
 
 def read_checked(path, digest):
@@ -64,10 +77,12 @@ def read_checked(path, digest):
     sha256. Opens without following symlinks and checks type and owner on the
     open descriptor itself."""
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        if not NOFOLLOW and os.path.islink(path):
+            return None
+        fd = os.open(path, os.O_RDONLY | NOFOLLOW | BINARY)
         with os.fdopen(fd, "rb") as fh:
             info = os.fstat(fh.fileno())
-            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid():
+            if not stat.S_ISREG(info.st_mode) or not (WINDOWS or info.st_uid == os.getuid()):
                 return None
             data = fh.read(2_000_000)
     except OSError:
@@ -90,8 +105,10 @@ def sealed_copy(path, digest, session):
         os.makedirs(COPIES, exist_ok=True)
         os.chmod(COPIES, 0o700)
         copy = os.path.join(COPIES, f"{session}-{digest[:12]}.md")
+        if WINDOWS and read_checked(copy, digest) is not None:   # already there, and read-only: Windows will not replace it
+            return copy
         tmp = f"{copy}.{os.getpid()}.tmp"
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o400)
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | NOFOLLOW | BINARY, 0o400)
         with os.fdopen(fd, "wb") as fh:
             fh.write(data)
         os.replace(tmp, copy)
@@ -104,8 +121,7 @@ def main():
     if len(sys.argv) != 5:
         return 2
     pane, session, handoff, digest = sys.argv[1:5]
-    if (not re.fullmatch(r"/[A-Za-z0-9_./-]+/handoffs/[A-Za-z0-9_.-]+\.md", handoff)
-            or ".." in handoff.split("/") or not re.fullmatch(r"[0-9a-f]{64}", digest)):
+    if not handoff_ok(handoff) or not re.fullmatch(r"[0-9a-f]{64}", digest):
         return 2
     if not re.fullmatch(r"[A-Za-z0-9:_-]{1,40}", pane) or not re.fullmatch(r"[0-9a-f-]{8,64}", session):
         return 2
@@ -135,7 +151,8 @@ def main():
     if read_checked(copy, digest) is None:          # the copy is rechecked right before sending
         log(pane, f"{session[:8]} -> {new[:8]} CLEARED, but the handoff copy does not match: pickup NOT sent; original at {handoff}")
         return 1
-    rc, _ = herdr("agent", "prompt", pane, f"{PICKUP} {copy}" if PICKUP.startswith("/") else PICKUP, timeout=20)
+    where = f'"{copy}"' if " " in copy else copy     # a Windows profile can hold a space: the prompt splits on it
+    rc, _ = herdr("agent", "prompt", pane, f"{PICKUP} {where}" if PICKUP.startswith("/") else PICKUP, timeout=20)
     log(pane, f"{session[:8]} -> {new[:8]} " + ("pickup sent" if rc == 0 else "CLEARED, but the pickup was not accepted: run /clear-pickup pickup"))
     return rc
 

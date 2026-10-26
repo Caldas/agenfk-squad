@@ -88,9 +88,17 @@ export function buildEvent(kind: string, payload: Record<string, unknown> | unde
   return event;
 }
 
+/** The interpreter that runs the bridge. `python3` is the Microsoft Store stub on a stock Windows. */
+export function pythonCommand(
+  env: Record<string, string | undefined> = process.env,
+  platform: string = process.platform,
+): string {
+  return env.SQUAD_PYTHON || (platform === 'win32' ? 'python' : 'python3');
+}
+
 function runBridge(event: Record<string, unknown>): BridgeVerdict {
   try {
-    const r = spawnSync('python3', [bridgePath()], {
+    const r = spawnSync(pythonCommand(), [bridgePath()], {
       input: JSON.stringify(event), encoding: 'utf8', timeout: 30_000, windowsHide: true,
     });
     const out = (r.stdout || '').trim();

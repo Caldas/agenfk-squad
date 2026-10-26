@@ -48,7 +48,7 @@ def omp_session(home, sid=SID):
 
 
 def run(home, event):
-    env = dict(os.environ, HOME=home)
+    env = dict(os.environ, HOME=home, USERPROFILE=home)
     for key in list(env):
         if key.startswith("SQUAD_") or key.startswith("HERDR_"):
             del env[key]
@@ -119,7 +119,7 @@ def test_own_handoff_reads_an_omp_transcript():
         os.makedirs(d)
         written = os.path.join(d, "20261013-000000-x.md")
         content = "# Handoff\n\nreal content\n"
-        with open(written, "w") as fh:
+        with open(written, "w", newline="") as fh:
             fh.write(content)
         transcript = os.path.join(home, "s.jsonl")
         rec = {"type": "message", "id": "m9", "message": {

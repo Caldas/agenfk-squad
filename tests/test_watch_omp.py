@@ -44,7 +44,7 @@ def omp_session(home, sid="01a136aa-1111-2222-3333-444455556666"):
 
 
 def run(home, payload):
-    env = dict(os.environ, HOME=home)
+    env = dict(os.environ, HOME=home, USERPROFILE=home)
     for key in list(env):
         if key.startswith("SQUAD_") or key.startswith("HERDR_"):
             del env[key]

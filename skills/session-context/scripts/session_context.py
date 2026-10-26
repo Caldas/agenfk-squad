@@ -407,7 +407,7 @@ def latest_handoff(cwd):
     cands = []
     probe = os.path.abspath(cwd) if cwd else ""
     names = set()
-    while probe and probe != "/":
+    while probe and os.path.dirname(probe) != probe:     # stops at the root of the tree: "/" or "C:\"
         names.add(os.path.basename(probe).lower())
         cands += glob.glob(os.path.join(probe, ".claude", "handoffs", "*.md"))
         if os.path.isdir(os.path.join(probe, ".git")) or os.path.isfile(os.path.join(probe, ".git")):
