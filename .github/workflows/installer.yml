@@ -1,25 +1,36 @@
 name: installer
 
 # Smoke test of the one-command installer on the systems it promises: Linux
-# (sh is dash) and macOS (sh is bash 3.2). Python 3.10 is the floor get.sh
-# accepts. Runs only when the installer or what it drives changes.
+# (sh is dash), macOS (sh is bash 3.2) and Windows (get.ps1 / install.ps1, in
+# Windows PowerShell 5.1, the one every Windows has). Python 3.10 is the floor
+# the installers accept. Runs only when an installer or what it drives changes.
 on:
   push:
     branches: [main, beta]
     paths:
       - get.sh
       - install.sh
+      - get.ps1
+      - install.ps1
+      - .gitattributes
       - scripts/squad_settings.py
       - hooks/manifest.json
       - tests/test_get.py
+      - tests/test_install_ps1.py
+      - tests/test_get_ps1.py
       - .github/workflows/installer.yml
   pull_request:
     paths:
       - get.sh
       - install.sh
+      - get.ps1
+      - install.ps1
+      - .gitattributes
       - scripts/squad_settings.py
       - hooks/manifest.json
       - tests/test_get.py
+      - tests/test_install_ps1.py
+      - tests/test_get_ps1.py
       - .github/workflows/installer.yml
 
 permissions:
@@ -34,9 +45,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 30 || 10 }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -47,5 +58,11 @@ jobs:
         run: shellcheck -s sh get.sh
       - name: Compile the settings script
         run: python -m py_compile scripts/squad_settings.py
-      - name: Installer test suite (throwaway HOME, file:// clone)
+      - name: Installer test suite (throwaway HOME, file:// clone; says so and exits 0 on Windows)
         run: python tests/test_get.py
+      - name: "Windows installers (install.ps1 and get.ps1, throwaway profile, file:// clone)"
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          python -B tests/test_install_ps1.py
+          python -B tests/test_get_ps1.py

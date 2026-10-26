@@ -41,6 +41,21 @@ SHA1 = re.compile(r"^[0-9a-f]{40}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
+def is_link(path):
+    """A symbolic link, or on Windows a junction (os.path.islink is False for it): a vendored skill is a copy of
+    files, and a junction would pull a directory from anywhere into the hash and into the install."""
+    if os.path.islink(path):
+        return True
+    if os.name == "nt":
+        try:
+            # IO_REPARSE_TAG_MOUNT_POINT is a junction. Any other reparse point (a OneDrive placeholder, a dedup
+            # file) is a real file that merely carries the attribute: it is not a link.
+            return os.lstat(path).st_reparse_tag == 0xA0000003
+        except (OSError, AttributeError):
+            return False
+    return False
+
+
 def tree_hash(path):
     """(sha256 hex of the skill directory, symlinks found inside it), by the recipe above."""
     files, links = [], []
@@ -48,7 +63,7 @@ def tree_hash(path):
         for n in sorted(dirnames + filenames):
             full = os.path.join(dirpath, n)
             rel = os.path.relpath(full, path).replace(os.sep, "/")
-            if os.path.islink(full):
+            if is_link(full):
                 links.append(rel)
             elif n in filenames:
                 files.append(rel)
@@ -96,7 +111,7 @@ def check(vendor):
         full = os.path.join(vendor, n)
         if n == "LOCK":
             continue
-        if os.path.islink(full):
+        if is_link(full):
             problems.append(f"{n}: is a symlink in skills/vendor/; vendored skills are copies, not links")
             continue
         if not os.path.isdir(full):
@@ -197,7 +212,38 @@ def test_lock_entry_without_directory_fails():
                         "remove the line or restore the skill"], problems
 
 
+def can_symlink():
+    """Windows lets only some accounts create symbolic links (Developer Mode, or an administrator)."""
+    d = tempfile.mkdtemp(prefix="probe-")
+    try:
+        os.symlink(d, os.path.join(d, "link"))
+        return True
+    except (OSError, NotImplementedError):
+        return False
+
+
+def junction(link, target):
+    r = subprocess.run(["cmd", "/c", "mklink", "/J", link, target], capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_junction_inside_or_as_a_vendored_skill_fails():
+    if os.name != "nt":
+        return        # a junction is a Windows thing; the symlink twin of this test is the next one
+    outside = tempfile.mkdtemp(prefix="outside-")
+    v = vendor_copy()
+    junction(os.path.join(v, "canvas-design", "fonts-elsewhere"), outside)
+    problems = check(v)
+    assert any(p.startswith("canvas-design: symlink inside a vendored skill (fonts-elsewhere)") for p in problems), problems
+    v = vendor_copy()
+    junction(os.path.join(v, "linked-skill"), outside)
+    assert check(v) == ["linked-skill: is a symlink in skills/vendor/; vendored skills are copies, not links"]
+
+
 def test_symlink_inside_or_as_a_vendored_skill_fails():
+    if not can_symlink():
+        print("skipped (this account cannot create symbolic links; the junction twin runs instead)")
+        return
     outside = tempfile.mkdtemp(prefix="outside-")
     v = vendor_copy()
     os.symlink(outside, os.path.join(v, "canvas-design", "fonts-elsewhere"))

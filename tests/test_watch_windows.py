@@ -77,34 +77,34 @@ def test_the_owner_check_is_uid_on_posix_and_the_profile_acl_on_windows():
 
 def test_handoff_paths_in_both_spellings():
     ok = sw.handoff_path_ok
-    assert ok("/home/u/.claude/handoffs/20261026-101010-win.md", windows=False)
-    assert ok(r"C:\Users\u\.claude\handoffs\20261026-101010-win.md", windows=True)
-    assert ok("C:/Users/u/.claude/handoffs/20261026-101010-win.md", windows=True)
-    assert ok(r"C:\Users\Fábio T\.claude\handoffs\a.md", windows=True)     # accents and spaces live in profiles
-    assert ok(r"C:\Users\FABIOT~1\.claude\handoffs\a.md", windows=True)    # 8.3 short names
+    assert ok("/srv/u/.claude/handoffs/20261026-101010-win.md", windows=False)
+    assert ok(r"C:\Profiles\u\.claude\handoffs\20261026-101010-win.md", windows=True)
+    assert ok("C:/Profiles/u/.claude/handoffs/20261026-101010-win.md", windows=True)
+    assert ok(r"C:\Profiles\Fábio T\.claude\handoffs\a.md", windows=True)     # accents and spaces live in profiles
+    assert ok(r"C:\Profiles\FABIOT~1\.claude\handoffs\a.md", windows=True)    # 8.3 short names
 
 
 def test_handoff_paths_that_must_be_refused():
     ok = sw.handoff_path_ok
-    assert not ok(r"C:\Users\u\..\handoffs\a.md", windows=True)            # parent segment
+    assert not ok(r"C:\Profiles\u\..\handoffs\a.md", windows=True)            # parent segment
     assert not ok(r"handoffs\a.md", windows=True)                          # relative
     assert not ok(r"\\server\share\handoffs\a.md", windows=True)           # UNC share
-    assert not ok(r"C:\Users\u\handoffs\a.txt", windows=True)              # not a handoff file
-    assert not ok(r"C:\Users\u\handoffs\a;b.md", windows=True)             # shell metacharacter
-    assert not ok(r"C:\Users\...\handoffs\a.md", windows=True)             # a segment of dots only
-    assert not ok(r"C:\Users\ \handoffs\a.md", windows=True)               # a segment of spaces only
-    assert not ok(r"C:\Users\u\handoffs\a.md:stream", windows=True)        # alternate data stream
-    assert not ok("/home/u/../handoffs/a.md", windows=False)
-    assert not ok("/home/u/handoffs/a b.md", windows=False)                # POSIX stays strict
-    assert not ok(r"C:\Users\u\handoffs\a.md", windows=False)              # a drive path is not POSIX
+    assert not ok(r"C:\Profiles\u\handoffs\a.txt", windows=True)              # not a handoff file
+    assert not ok(r"C:\Profiles\u\handoffs\a;b.md", windows=True)             # shell metacharacter
+    assert not ok(r"C:\Profiles\...\handoffs\a.md", windows=True)             # a segment of dots only
+    assert not ok(r"C:\Profiles\ \handoffs\a.md", windows=True)               # a segment of spaces only
+    assert not ok(r"C:\Profiles\u\handoffs\a.md:stream", windows=True)        # alternate data stream
+    assert not ok("/srv/u/../handoffs/a.md", windows=False)
+    assert not ok("/srv/u/handoffs/a b.md", windows=False)                # POSIX stays strict
+    assert not ok(r"C:\Profiles\u\handoffs\a.md", windows=False)              # a drive path is not POSIX
 
 
 def test_the_harness_is_read_from_a_windows_path():
     h = sw.harness
-    assert h({"transcript_path": r"C:\Users\u\.omp\agent\sessions\p\s.jsonl"}) == "omp"
-    assert h({"transcript_path": r"C:\Users\u\.pi\agent\sessions\p\s.jsonl"}) == "pi"
-    assert h({"transcript_path": r"C:\Users\u\.codex\sessions\s.jsonl"}) == "codex"
-    assert h({"transcript_path": r"C:\Users\u\.claude\projects\p\s.jsonl"}) == "claude"
+    assert h({"transcript_path": r"C:\Profiles\u\.omp\agent\sessions\p\s.jsonl"}) == "omp"
+    assert h({"transcript_path": r"C:\Profiles\u\.pi\agent\sessions\p\s.jsonl"}) == "pi"
+    assert h({"transcript_path": r"C:\Profiles\u\.codex\sessions\s.jsonl"}) == "codex"
+    assert h({"transcript_path": r"C:\Profiles\u\.claude\projects\p\s.jsonl"}) == "claude"
 
 
 def test_a_detached_child_is_detached_the_way_the_platform_does_it():
@@ -171,10 +171,10 @@ def load_switch(copies):
 
 def test_the_switch_takes_the_same_handoff_paths_as_the_watcher():
     sws = load_switch(os.path.join(_profile, "copies"))
-    assert sws.handoff_ok("/home/u/.claude/handoffs/a.md") is sw.handoff_path_ok("/home/u/.claude/handoffs/a.md")
-    assert not sws.handoff_ok("/home/u/../handoffs/a.md")
+    assert sws.handoff_ok("/srv/u/.claude/handoffs/a.md") is sw.handoff_path_ok("/srv/u/.claude/handoffs/a.md")
+    assert not sws.handoff_ok("/srv/u/../handoffs/a.md")
     if WINDOWS:
-        assert sws.handoff_ok(r"C:\Users\u\.claude\handoffs\a.md")
+        assert sws.handoff_ok(r"C:\Profiles\u\.claude\handoffs\a.md")
         assert not sws.handoff_ok(r"\\server\share\handoffs\a.md")
 
 

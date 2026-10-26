@@ -29,19 +29,19 @@ def which_only(**found):
 
 
 def test_posix_command_is_what_it_always_was():
-    cmd = ss.command_for("/home/u/.claude", "squad-watch.py", windows=False)
-    assert cmd == "python3 " + shlex.quote(os.path.join("/home/u/.claude", "hooks", "squad-watch.py")), cmd
+    cmd = ss.command_for("/srv/u/.claude", "squad-watch.py", windows=False)
+    assert cmd == "python3 " + shlex.quote(os.path.join("/srv/u/.claude", "hooks", "squad-watch.py")), cmd
 
 
 def test_windows_command_uses_forward_slashes_and_a_real_interpreter():
-    cmd = ss.command_for(r"C:\Users\u\.claude", "squad-watch.py", windows=True, launcher="python")
-    assert cmd == 'python "C:/Users/u/.claude/hooks/squad-watch.py"', cmd
-    cmd = ss.command_for(r"C:\Users\Fábio T\.claude", "squad-watch.py", windows=True, launcher="py -3")
-    assert cmd == 'py -3 "C:/Users/Fábio T/.claude/hooks/squad-watch.py"', cmd
+    cmd = ss.command_for(r"C:\Profiles\u\.claude", "squad-watch.py", windows=True, launcher="python")
+    assert cmd == 'python "C:/Profiles/u/.claude/hooks/squad-watch.py"', cmd
+    cmd = ss.command_for(r"C:\Profiles\Fábio T\.claude", "squad-watch.py", windows=True, launcher="py -3")
+    assert cmd == 'py -3 "C:/Profiles/Fábio T/.claude/hooks/squad-watch.py"', cmd
 
 
 def test_the_windows_interpreter_is_never_the_store_stub():
-    stub = r"C:\Users\u\AppData\Local\Microsoft\WindowsApps\python.exe"
+    stub = r"C:\Profiles\u\AppData\Local\Microsoft\WindowsApps\python.exe"
     real = r"C:\Program Files\Python314\python.exe"
     pick = ss.interpreter
     assert pick(windows=False) == "python3"
@@ -78,17 +78,17 @@ def test_a_stale_python3_entry_is_repaired_on_windows_and_left_alone_on_posix():
             assert len(cmds) == 1 and not cmds[0].startswith("python3"), cmds      # repaired, not duplicated
             rc, out, _ = run_main("install", "--config", config, "--manifest", MANIFEST)
             assert "fixed" not in out, out                                          # and then stable
-    groups = [{"hooks": [{"type": "command", "command": "python3 /home/u/.claude/hooks/squad-router.py"}]}]
-    assert ss.repair_stale(groups, "/home/u/.claude", "squad-router.py", windows=False) == 0
+    groups = [{"hooks": [{"type": "command", "command": "python3 /srv/u/.claude/hooks/squad-router.py"}]}]
+    assert ss.repair_stale(groups, "/srv/u/.claude", "squad-router.py", windows=False) == 0
     assert groups[0]["hooks"][0]["command"].startswith("python3 ")
 
 
 def test_split_reads_both_spellings_of_a_windows_command():
-    words = ss.split_command(r'python "C:\Users\u\.claude\hooks\squad-watch.py"', windows=True)
-    assert words == ["python", r"C:\Users\u\.claude\hooks\squad-watch.py"], words
-    words = ss.split_command('py -3 "C:/Users/u/.claude/hooks/squad-watch.py"', windows=True)
-    assert words == ["py", "-3", "C:/Users/u/.claude/hooks/squad-watch.py"], words
-    assert ss.split_command("python3 '/home/u/a b/x.py'", windows=False) == ["python3", "/home/u/a b/x.py"]
+    words = ss.split_command(r'python "C:\Profiles\u\.claude\hooks\squad-watch.py"', windows=True)
+    assert words == ["python", r"C:\Profiles\u\.claude\hooks\squad-watch.py"], words
+    words = ss.split_command('py -3 "C:/Profiles/u/.claude/hooks/squad-watch.py"', windows=True)
+    assert words == ["py", "-3", "C:/Profiles/u/.claude/hooks/squad-watch.py"], words
+    assert ss.split_command("python3 '/srv/u/a b/x.py'", windows=False) == ["python3", "/srv/u/a b/x.py"]
     assert ss.split_command('python "unterminated', windows=True) is None
 
 

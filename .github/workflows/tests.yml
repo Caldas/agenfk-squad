@@ -35,6 +35,17 @@ jobs:
         run: bash -n install.sh
       - name: Watcher test suite
         run: python tests/test_watch.py
+      - name: Platform seams, hook registration, omp adapters and the CI config itself
+        run: |
+          for t in tests/test_watch_windows.py tests/test_squad_settings.py tests/test_watch_omp.py tests/test_watch_omp_bridge.py                    tests/test_session_context_omp.py tests/test_omp_agents.py tests/test_local_validation_profile.py                    tests/test_private_paths.py tests/test_ci_config.py; do
+            python -B "$t" || exit 1
+          done
+      # the PowerShell installers say so and exit 0 on Linux: their real run is the windows job
+      - name: PowerShell installer tests (skip on Linux, run on Windows)
+        run: |
+          for t in tests/test_install_ps1.py tests/test_get_ps1.py; do
+            python -B "$t" || exit 1
+          done
       # Node is the same on every Python leg: run the helper tests once.
       - uses: actions/setup-node@v4
         if: matrix.python == '3.12'
@@ -50,5 +61,50 @@ jobs:
             echo "::error::changed-ranges reported '${passed:-no}' passing tests; expected at least 23."
             exit 1
           fi
+      - uses: actions/setup-node@v4
+        if: matrix.python == '3.12'
+        with:
+          node-version: "24"        # the omp extension is TypeScript: Node 24 runs it without a build step
+      - name: omp extension routes events and applies verdicts
+        if: matrix.python == '3.12'
+        run: python tests/test_squad_watch_omp_ts.py
+      - name: No private paths in the tree (a home directory on Linux or Windows)
+        run: python scripts/check_private_paths.py
+
+  # The same suite on Windows (Git Bash for the loop; PowerShell for the installers, which the tests start).
+  # A runner administrator may create symbolic links, so the symlink branches run here too.
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.12", "3.14"]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Git keeps the line endings the repository says (LF), whatever autocrlf is
+        run: |
+          git config --global core.autocrlf true
+          git rm --cached -r -q .
+          git reset --hard -q
+          if git ls-files --eol | grep -q 'w/crlf'; then echo "::error::a text file is still CRLF in the work tree"; exit 1; fi
+      - name: Compile hooks and scripts
+        run: python -m py_compile hooks/*.py scripts/*.py skills/session-context/scripts/session_context.py
+      - name: Whole test suite (a test that is not for Windows says so and exits 0)
+        run: |
+          for t in tests/test_*.py; do
+            echo "::group::$t"
+            python -B "$t" || { echo "::error::$t failed"; exit 1; }
+            echo "::endgroup::"
+          done
       - name: No private paths in the tree
-        run: "! grep -rnE '/home/[a-z]+/' --exclude-dir=.git --exclude-dir=vendor ."
+        run: python scripts/check_private_paths.py
