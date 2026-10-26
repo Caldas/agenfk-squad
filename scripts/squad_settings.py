@@ -35,8 +35,11 @@ import json
 import os
 import shlex
 import shutil
+import subprocess
 import sys
 import time
+
+WINDOWS = os.name == "nt"
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MANIFEST = os.path.join(ROOT, "hooks", "manifest.json")
@@ -93,27 +96,100 @@ def check_shape(settings):
     return None
 
 
-def squad_script(command, config, clone=ROOT):
+def squad_script(command, config, clone=ROOT, windows=None):
     """The squad script this hook command runs, or None when it is not the squad's."""
     if not isinstance(command, str):
         return None
-    try:
-        words = shlex.split(command)
-    except ValueError:
+    windows = WINDOWS if windows is None else windows
+    words = split_command(command, windows)
+    if not words or not is_interpreter(words[0], windows) or len(words) not in (2, 3):
         return None
-    if len(words) != 2 or words[0] not in ("python3", "python"):
-        return None
-    path = os.path.abspath(os.path.expandvars(os.path.expanduser(words[1])))
+    if len(words) == 3 and not (windows and words[1] == "-3" and interpreter_name(words[0]) == "py"):
+        return None                          # only the launcher takes a flag: `py -3 <script>`
+    path = os.path.abspath(os.path.expandvars(os.path.expanduser(words[-1])))
     script = os.path.basename(path)
+    if windows:
+        script = script.lower()              # the manifest names are lowercase and the file system does not care
     linked = os.path.join(config, "hooks", script)
-    real = os.path.realpath(path)
-    if real in (os.path.realpath(linked), os.path.join(os.path.realpath(clone), "hooks", script)):
+    real = os.path.normcase(os.path.realpath(path))
+    mine = (os.path.realpath(linked), os.path.join(os.path.realpath(clone), "hooks", script))
+    if real in tuple(os.path.normcase(m) for m in mine):
         return script
     return None
 
 
-def command_for(config, script):
-    return "python3 " + shlex.quote(os.path.join(config, "hooks", script))
+def split_command(command, windows=None):
+    """The words of a hook command, or None when it cannot be read. On Windows a
+    backslash is a path separator, not an escape, and the quotes stay for us to strip."""
+    windows = WINDOWS if windows is None else windows
+    try:
+        words = shlex.split(command, posix=not windows)
+    except ValueError:
+        return None
+    if windows:
+        words = [w[1:-1] if len(w) >= 2 and w[0] == w[-1] and w[0] in "\"'" else w for w in words]
+    return words
+
+
+def interpreter_name(word):
+    """`C:/Python314/python.exe` -> `python`."""
+    name = os.path.basename(word.replace("\\", "/")).lower()
+    return name[:-4] if name.endswith(".exe") else name
+
+
+def is_interpreter(word, windows=None):
+    windows = WINDOWS if windows is None else windows
+    name = interpreter_name(word)
+    if windows:
+        return name in ("python", "python3", "py", "pythonw")
+    return word in ("python3", "python")
+
+
+def launcher_has_python3():
+    """The `py` launcher can be on PATH with no Python 3 behind it."""
+    try:
+        return subprocess.run(["py", "-3", "-c", "pass"], capture_output=True, timeout=20).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def interpreter(windows=None, which=shutil.which, executable=sys.executable, probe=launcher_has_python3):
+    """What a hook command starts with. `python3` is the Microsoft Store stub on a stock Windows, so there it is
+    `python` when that is a real install, else the `py` launcher (when it has a Python 3), else the interpreter
+    running this script, by absolute path. That last form needs a shell that runs a quoted path (Git Bash does;
+    PowerShell wants `& `), which is why it is the last resort."""
+    windows = WINDOWS if windows is None else windows
+    if not windows:
+        return "python3"
+    found = which("python")
+    if found and "windowsapps" not in found.replace("/", "\\").lower():
+        return "python"
+    if which("py") and probe():
+        return "py -3"
+    return '"' + executable.replace("\\", "/") + '"'
+
+
+def command_for(config, script, windows=None, launcher=None):
+    windows = WINDOWS if windows is None else windows
+    path = os.path.join(config, "hooks", script)
+    if windows:
+        return f'{launcher or interpreter(True)} "{path.replace(chr(92), "/")}"'
+    return "python3 " + shlex.quote(path)
+
+
+def repair_stale(groups, config, script, windows=None):
+    """On Windows an entry written as `python3 ...` runs the Microsoft Store stub and does nothing: point it at
+    a real interpreter. Returns how many entries were rewritten."""
+    windows = WINDOWS if windows is None else windows
+    fixed = 0
+    for g in groups:
+        for h in g.get("hooks", []):
+            if isinstance(h, dict) and squad_script(h.get("command"), config, windows=windows) == script:
+                words = split_command(h["command"], windows)
+                if windows and interpreter_name(words[0]) == "python3":
+                    h["command"] = command_for(config, script, windows=True)
+                    fixed += 1
+    return fixed
 
 
 def install(settings, config, plan, matchers, report):
@@ -126,6 +202,10 @@ def install(settings, config, plan, matchers, report):
             there = any(squad_script(h.get("command"), config) == script
                         for g in groups for h in g.get("hooks", []) if isinstance(h, dict))
             if there:
+                if repair_stale(groups, config, script):
+                    changed = True
+                    report.append(f"fixed   {script:<16} {event} (was `python3`, the Microsoft Store stub)")
+                    continue
                 report.append(f"on      {script:<16} {event} (already registered)")
             elif not os.path.exists(os.path.join(config, "hooks", script)):
                 report.append(f"SKIPPED {script:<16} {event}: {os.path.join(config, 'hooks', script)} "
