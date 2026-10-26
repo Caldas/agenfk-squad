@@ -1,0 +1,9 @@
+# One line ending for everyone, whatever core.autocrlf says on the machine that checks it out:
+# the sha256 pinned in skills/vendor/LOCK is of LF bytes, and a CRLF checkout (Windows) would break it.
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ttf binary
+*.png binary
+*.jpg binary
+*.gif binary

@@ -17,6 +17,9 @@ import sys
 import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if os.name == "nt":
+    print("skipped: get.sh is for Linux, WSL and macOS; Windows has get.ps1 (tests/test_get_ps1.py)")
+    sys.exit(0)
 GET = os.path.join(ROOT, "get.sh")
 with open(os.path.join(ROOT, "hooks", "manifest.json")) as _fh:
     MANIFEST = json.load(_fh)

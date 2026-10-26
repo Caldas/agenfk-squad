@@ -131,12 +131,28 @@ def repo_copy():
     return dst
 
 
+WINDOWS = os.name == "nt"      # install.sh links with symlinks and runs under bash: Windows has install.ps1 (tests/test_install_ps1.py)
+
+
 def install(repo):
     h = tempfile.mkdtemp(prefix="home-")
     cfg = os.path.join(h, "claude")
     env = dict(os.environ, HOME=h, CLAUDE_CONFIG_DIR=cfg)
     r = subprocess.run(["bash", os.path.join(repo, "install.sh")], capture_output=True, text=True, env=env)
     return r, cfg
+
+
+def test_gitattributes_pins_lf_so_the_lock_holds_on_a_crlf_machine():
+    # LOCK pins the sha256 of LF bytes. With core.autocrlf=true (the Windows default) a checkout is CRLF
+    # and every vendored text file drifts, unless .gitattributes says otherwise.
+    with open(os.path.join(ROOT, ".gitattributes"), encoding="utf-8") as fh:
+        rules = [line.split() for line in fh if line.strip() and not line.startswith("#")]
+    assert ["*", "text=auto", "eol=lf"] in rules, rules
+    for ext in ("ttf",):
+        assert [f"*.{ext}", "binary"] in rules, ext            # the fonts are bytes, never "text"
+    out = subprocess.run(["git", "-C", ROOT, "check-attr", "eol", "--", "skills/vendor/LOCK"],
+                         capture_output=True, text=True).stdout
+    assert "eol: lf" in out, out
 
 
 def test_vendor_tree_matches_lock():
@@ -216,6 +232,8 @@ def test_lock_fields_are_checked():
 
 
 def test_install_refuses_a_source_that_resolves_outside_the_repo():
+    if WINDOWS:
+        return        # install.sh is not how Windows installs: see tests/test_install_ps1.py
     outside = tempfile.mkdtemp(prefix="outside-")
     with open(os.path.join(outside, "SKILL.md"), "w") as fh:
         fh.write("---\nname: evil\ndescription: x\n---\n")
@@ -240,6 +258,8 @@ def test_install_refuses_a_source_that_resolves_outside_the_repo():
 
 
 def test_install_refuses_a_sibling_that_shares_the_repo_prefix():
+    if WINDOWS:
+        return        # install.sh is not how Windows installs: see tests/test_install_ps1.py
     repo = repo_copy()
     sibling = repo + "-evil"                                           # <repo>-evil starts with <repo>
     os.makedirs(sibling)
@@ -254,6 +274,8 @@ def test_install_refuses_a_sibling_that_shares_the_repo_prefix():
 
 
 def test_install_links_a_clean_copy_and_exits_zero():
+    if WINDOWS:
+        return        # install.sh is not how Windows installs: see tests/test_install_ps1.py
     repo = repo_copy()
     r, cfg = install(repo)
     assert r.returncode == 0, r.stdout + r.stderr
