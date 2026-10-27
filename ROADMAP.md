@@ -98,7 +98,12 @@ These need data more than code.
 ## Smaller things
 
 - macOS: untested. The hooks use `fcntl` and POSIX paths; reports welcome.
-- Windows: not supported. WSL should behave like Linux.
+- Windows: supported natively (`get.ps1`, `install.ps1`, a Windows CI job);
+  WSL behaves like Linux. Open on Windows: a session switch without herdr, a
+  marked copy that becomes a link by itself when Developer Mode is turned on,
+  and a hook command that works in PowerShell when only an absolute
+  interpreter path is found. See [Known limitations on
+  Windows](docs/installation.md#known-limitations-on-windows).
 - `install.sh --uninstall` and `install.sh --dry-run`.
 - A `squad-watch doctor` command that checks hook registration and prints the
   effective thresholds.

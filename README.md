@@ -154,6 +154,16 @@ examples, is in [docs/watcher.md](docs/watcher.md).
 
 You need Claude Code, Python 3.10 or newer, `git`, and AgenFK.
 
+**On Windows**, one line in PowerShell does steps 2 and 3 below (clone, link,
+register the hooks); what to have first, options, update and uninstall are in
+[docs/installation.md](docs/installation.md#windows):
+
+```powershell
+irm https://raw.githubusercontent.com/eduardopin/agenfk-squad/main/get.ps1 | iex
+```
+
+On Linux, macOS and WSL:
+
 ```bash
 # 1. AgenFK first: the squad assumes its CLI is on your PATH
 #    https://github.com/cglab-public/agenfk#installation--setup
@@ -192,7 +202,7 @@ Then open a project that has an AgenFK board and ask for something:
 | [docs/watcher.md](docs/watcher.md) | The handoff arithmetic, the dispatch brake, the soft stop, the session switch, the merge queue |
 | [docs/agenfk-integration.md](docs/agenfk-integration.md) | Flow step → agent → AgenFK command → evidence; how to activate the flow |
 | [docs/configuration.md](docs/configuration.md) | Every `SQUAD_*` variable and its default |
-| [docs/installation.md](docs/installation.md) | Requirements, what the installer links, the `settings.json` hooks, uninstalling |
+| [docs/installation.md](docs/installation.md) | Requirements, what the installer links, the `settings.json` hooks, uninstalling, and the Windows section |
 | [docs/external-contributor-agent.md](docs/external-contributor-agent.md) | Copy-paste onboarding protocol for external Claude Code and other coding agents |
 | [ROADMAP.md](ROADMAP.md) | What is missing, and where help is most useful |
 
@@ -236,8 +246,11 @@ AgenFK flow. A `DESIGN.md` at the root guides `frontend`.
 ## Status
 
 This is the working setup of one person, published as it is. It runs daily on
-Linux with Claude Code. The automatic session switch depends on the
-[herdr](docs/installation.md#optional-dependencies) pane manager; without it the watcher still
+Linux with Claude Code; macOS is untested. It also runs natively on Windows 10
+and 11, with its own installer and CI job (see
+[Windows](docs/installation.md#windows)). The automatic session switch depends on the
+[herdr](docs/installation.md#optional-dependencies) pane manager, which
+Windows does not have; without it the watcher still
 orders the handoff and you type `/clear` and `/clear-pickup pickup` yourself.
 The session report reads Codex, pi and oh-my-pi transcripts too, but the hooks
 only drive Claude Code. [ROADMAP.md](ROADMAP.md) lists what that leaves open.

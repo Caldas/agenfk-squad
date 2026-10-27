@@ -37,7 +37,7 @@ jobs:
         run: python tests/test_watch.py
       - name: Platform seams, hook registration, omp adapters and the CI config itself
         run: |
-          for t in tests/test_watch_windows.py tests/test_squad_settings.py tests/test_watch_omp.py tests/test_watch_omp_bridge.py                    tests/test_session_context_omp.py tests/test_omp_agents.py tests/test_local_validation_profile.py                    tests/test_private_paths.py tests/test_ci_config.py; do
+          for t in tests/test_watch_windows.py tests/test_squad_settings.py tests/test_watch_omp.py tests/test_watch_omp_bridge.py                    tests/test_session_context_omp.py tests/test_omp_agents.py tests/test_local_validation_profile.py                    tests/test_private_paths.py tests/test_ci_config.py tests/test_docs_windows.py; do
             python -B "$t" || exit 1
           done
       # the PowerShell installers say so and exit 0 on Linux: their real run is the windows job
