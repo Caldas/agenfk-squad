@@ -1,0 +1,149 @@
+<!doctype html>
+<!--
+  Neutral rendered document of the writing skill. Copy it and replace the content.
+  No logo and no brand: the look comes from the --ds-* block in :root. If the
+  project has a design system, replace that block with the output of sweep.py --css (below).
+  Bilingual page: start from templates/document-bilingual.html.
+  Before delivering: python3 -I ~/.claude/skills/writing/scripts/artifact_check.py <file>
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Restoring the staging database takes 42 minutes</title>
+<style>
+/* Design system: paste here the output of
+     python3 -I ~/.claude/skills/design-reference/scripts/sweep.py <root> --css
+   (with the dark blocks). The built-in default is the squad's neutral palette. */
+/* squad neutral palette: the project has no design system (sweep.py) */
+:root {
+  --ds-bg: #f7f8fa;
+  --ds-surface: #ffffff;
+  --ds-fg: #15171c;
+  --ds-fg-2: #4b5262;
+  --ds-accent: #2f5bd3;
+  --ds-border: #d5dae2;
+  --ds-font-display: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --ds-font-body: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --ds-font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ds-bg: #111318;
+    --ds-surface: #1a1d24;
+    --ds-fg: #e8eaef;
+    --ds-fg-2: #a4abb9;
+    --ds-accent: #86a6ff;
+    --ds-border: #2e333d;
+  }
+}
+:root[data-theme="dark"] {
+  --ds-bg: #111318;
+  --ds-surface: #1a1d24;
+  --ds-fg: #e8eaef;
+  --ds-fg-2: #a4abb9;
+  --ds-accent: #86a6ff;
+  --ds-border: #2e333d;
+}
+/* Semantic tokens: they read only --ds-*; a component reads only the semantic
+   ones. The status tokens (ok, warn, danger) belong to the page and switch in dark mode. */
+:root{
+  --bg: var(--ds-bg);
+  --surface: var(--ds-surface);
+  --surface-raised: color-mix(in oklab, var(--ds-surface) 92%, var(--ds-fg));
+  --border: var(--ds-border);
+  --text: var(--ds-fg);
+  --text-muted: var(--ds-fg-2);
+  --text-faint: var(--ds-fg-2);
+  --accent: var(--ds-accent);
+  --ok: oklch(50% 0.12 155);
+  --warn: oklch(55% 0.13 70);
+  --danger: oklch(52% 0.17 27);
+  --font-display: var(--ds-font-display);
+  --font-text: var(--ds-font-body);
+  --font-mono: var(--ds-font-mono);
+  --measure: 72ch;
+  --radius: 6px;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ok: oklch(76% 0.13 155);
+    --warn: oklch(80% 0.13 75);
+    --danger: oklch(72% 0.15 25);
+  }
+}
+:root[data-theme="dark"]{
+  --ok: oklch(76% 0.13 155);
+  --warn: oklch(80% 0.13 75);
+  --danger: oklch(72% 0.15 25);
+}
+*{box-sizing:border-box}
+html{background:var(--bg); color:var(--text); -webkit-text-size-adjust:100%}
+body{margin:0; font:16px/1.6 var(--font-text); font-variant-numeric:tabular-nums}
+main{max-width:calc(var(--measure) + 2rem); margin:0 auto; padding:3rem 1rem 4rem}
+::selection{background:color-mix(in oklch, var(--accent) 30%, transparent)}
+a{color:var(--accent); text-underline-offset:.2em}
+:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+.eyebrow{font:500 .8rem/1.4 var(--font-mono); letter-spacing:.04em; text-transform:uppercase; color:var(--text-faint); margin:0 0 .5rem}
+h1,h2{font-family:var(--font-display)}
+h1{font-size:clamp(1.8rem, 4vw, 2.4rem); line-height:1.2; margin:0 0 .75rem; text-wrap:balance}
+h2{font-size:1.35rem; line-height:1.3; margin:2.5rem 0 .75rem; text-wrap:balance}
+p,li{color:var(--text-muted); max-width:var(--measure)}
+.lede{font-size:1.15rem; color:var(--text)}
+.meta{font:.85rem/1.5 var(--font-mono); color:var(--text-faint); border-top:1px solid var(--border); padding-top:.75rem; margin-top:1.5rem}
+.callout{border-left:3px solid var(--accent); background:var(--surface); padding:.9rem 1rem; border-radius:0 var(--radius) var(--radius) 0; color:var(--text)}
+.note{border:1px dashed var(--border); padding:.75rem 1rem; border-radius:var(--radius); font-size:.95rem}
+.status{font:600 .75rem/1 var(--font-mono); padding:.25rem .45rem; border-radius:999px; border:1px solid currentColor; white-space:nowrap}
+.status.ok{color:var(--ok)} .status.warn{color:var(--warn)} .status.danger{color:var(--danger)}
+.tbl-wrap{overflow-x:auto}
+table{border-collapse:collapse; width:100%; font-size:.95rem}
+th,td{text-align:left; padding:.5rem .75rem; border-bottom:1px solid var(--border); vertical-align:top}
+th{background:var(--surface); color:var(--text); font-weight:600}
+td.n,th.n{text-align:right}
+pre{background:var(--surface-raised); padding:1rem; border-radius:var(--radius); overflow-x:auto}
+code{font:.9em/1.5 var(--font-mono)}
+footer{max-width:calc(var(--measure) + 2rem); margin:0 auto; padding:1.5rem 1rem 3rem; font:.8rem var(--font-mono); color:var(--text-faint); border-top:1px solid var(--border)}
+@media (prefers-reduced-motion: reduce){*{transition:none!important; animation:none!important}}
+@media print{
+  html{-webkit-print-color-adjust:exact; print-color-adjust:exact}
+  main{padding-top:0}
+  pre{white-space:pre-wrap}
+}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <p class="eyebrow">Restore runbook</p>
+    <h1>Restoring the staging database takes 42 minutes and needs a snapshot at most 24 hours old</h1>
+    <p class="lede">Measured on 2026-10-02 with the 03:00 snapshot. The title states the finding; the body shows how to get there.</p>
+    <p class="meta">For: infrastructure on-call. Status: <span class="status ok">measured</span> in staging, <span class="status warn">not measured</span> in production.</p>
+  </header>
+
+  <section>
+    <h2>Almost all of the 42 minutes is the volume copy</h2>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Step</th><th class="n">Minutes</th><th>Note</th></tr></thead>
+        <tbody>
+          <tr><td>Snapshot copy</td><td class="n">31</td><td>Proportional to size: 180 GB</td></tr>
+          <tr><td>Instance restore</td><td class="n">9</td><td>Class db.r6g.large</td></tr>
+          <tr><td>Internal DNS switch</td><td class="n">2</td><td>TTL of 60 s</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="callout">A snapshot older than 24 hours loses the day's writes: check its date before you start.</p>
+  </section>
+
+  <section>
+    <h2>Restoring is one command per step</h2>
+    <pre><code>aws rds restore-db-instance-from-db-snapshot \
+  --db-instance-identifier staging-restore \
+  --db-snapshot-identifier &lt;SNAPSHOT_ID&gt; --profile &lt;RO_PROFILE&gt;</code></pre>
+    <p class="note">Production time has not been measured yet. The volume is four times larger, so the copy should dominate again; that is an estimate, not a measurement.</p>
+  </section>
+</main>
+<footer>Staging restore runbook, reviewed on 2026-10-02.</footer>
+</body>
+</html>

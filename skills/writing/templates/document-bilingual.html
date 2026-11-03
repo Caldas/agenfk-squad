@@ -1,0 +1,196 @@
+<!doctype html>
+<!--
+  Bilingual rendered document of the writing skill. Only when the audience is
+  bilingual or the owner asked; the default is templates/document.html, in one language.
+  data-languages declares the languages; the first is the one the page opens in.
+  Every visible text sits in an element with data-t="<key>", and the #i18n payload
+  has the same keys in every language. No logo and no brand: the look comes from the
+  --ds-* block; with a design system in the project, paste the output of sweep.py --css there.
+  Before delivering: python3 -I ~/.claude/skills/writing/scripts/artifact_check.py <file>
+-->
+<html lang="en" data-languages="en pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title data-t="meta-title">Restoring the staging database takes 42 minutes</title>
+<style>
+/* Design system: paste here the output of
+     python3 -I ~/.claude/skills/design-reference/scripts/sweep.py <root> --css
+   (with the dark blocks). The built-in default is the squad's neutral palette. */
+/* squad neutral palette: the project has no design system (sweep.py) */
+:root {
+  --ds-bg: #f7f8fa;
+  --ds-surface: #ffffff;
+  --ds-fg: #15171c;
+  --ds-fg-2: #4b5262;
+  --ds-accent: #2f5bd3;
+  --ds-border: #d5dae2;
+  --ds-font-display: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --ds-font-body: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --ds-font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ds-bg: #111318;
+    --ds-surface: #1a1d24;
+    --ds-fg: #e8eaef;
+    --ds-fg-2: #a4abb9;
+    --ds-accent: #86a6ff;
+    --ds-border: #2e333d;
+  }
+}
+:root[data-theme="dark"] {
+  --ds-bg: #111318;
+  --ds-surface: #1a1d24;
+  --ds-fg: #e8eaef;
+  --ds-fg-2: #a4abb9;
+  --ds-accent: #86a6ff;
+  --ds-border: #2e333d;
+}
+/* Semantic tokens: they read only --ds-*; a component reads only the semantic
+   ones. The status tokens (ok, warn, danger) belong to the page and switch in dark mode. */
+:root{
+  --bg: var(--ds-bg);
+  --surface: var(--ds-surface);
+  --surface-raised: color-mix(in oklab, var(--ds-surface) 92%, var(--ds-fg));
+  --border: var(--ds-border);
+  --text: var(--ds-fg);
+  --text-muted: var(--ds-fg-2);
+  --text-faint: var(--ds-fg-2);
+  --accent: var(--ds-accent);
+  --ok: oklch(50% 0.12 155);
+  --warn: oklch(55% 0.13 70);
+  --danger: oklch(52% 0.17 27);
+  --font-display: var(--ds-font-display);
+  --font-text: var(--ds-font-body);
+  --font-mono: var(--ds-font-mono);
+  --measure: 72ch;
+  --radius: 6px;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ok: oklch(76% 0.13 155);
+    --warn: oklch(80% 0.13 75);
+    --danger: oklch(72% 0.15 25);
+  }
+}
+:root[data-theme="dark"]{
+  --ok: oklch(76% 0.13 155);
+  --warn: oklch(80% 0.13 75);
+  --danger: oklch(72% 0.15 25);
+}
+*{box-sizing:border-box}
+html{background:var(--bg); color:var(--text)}
+body{margin:0; font:16px/1.6 var(--font-text); font-variant-numeric:tabular-nums}
+main{max-width:calc(var(--measure) + 2rem); margin:0 auto; padding:2rem 1rem 4rem}
+:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+.eyebrow{font:500 .8rem/1.4 var(--font-mono); letter-spacing:.04em; text-transform:uppercase; color:var(--text-faint); margin:0 0 .5rem}
+h1,h2{font-family:var(--font-display)}
+h1{font-size:clamp(1.8rem, 4vw, 2.4rem); line-height:1.2; margin:0 0 .75rem; text-wrap:balance}
+p,li{color:var(--text-muted); max-width:var(--measure)}
+.callout{border-left:3px solid var(--accent); background:var(--surface); padding:.9rem 1rem; border-radius:0 var(--radius) var(--radius) 0; color:var(--text)}
+table{border-collapse:collapse; width:100%; font-size:.95rem}
+th,td{text-align:left; padding:.5rem .75rem; border-bottom:1px solid var(--border)}
+th{background:var(--surface); color:var(--text)}
+td.n,th.n{text-align:right}
+footer{max-width:calc(var(--measure) + 2rem); margin:0 auto; padding:1.5rem 1rem 3rem; font:.8rem var(--font-mono); color:var(--text-faint); border-top:1px solid var(--border)}
+
+/* language bar */
+.langbar{position:sticky; top:0; z-index:10; display:flex; justify-content:flex-end; gap:.25rem; padding:.5rem 1rem; background:var(--bg); border-bottom:1px solid var(--border); font:600 .8rem var(--font-mono)}
+.langbar button{font:inherit; color:var(--text-muted); background:none; border:1px solid transparent; border-radius:var(--radius); padding:.35rem .6rem; min-width:44px; min-height:32px; cursor:pointer}
+.langbar button[aria-pressed="true"]{color:var(--text); border-color:var(--border); background:var(--surface)}
+html.render .langbar{display:none!important}
+@media print{ .langbar{display:none!important} html{print-color-adjust:exact; -webkit-print-color-adjust:exact} }
+@media (prefers-reduced-motion: reduce){*{transition:none!important; animation:none!important}}
+</style>
+</head>
+<body>
+<nav class="langbar" aria-label="Language" data-t-aria="nav-aria">
+  <button type="button" data-lang="en" aria-pressed="true" translate="no">EN</button>
+  <button type="button" data-lang="pt" aria-pressed="false" translate="no">PT</button>
+</nav>
+<main>
+  <p class="eyebrow" data-t="eyebrow">Restore runbook</p>
+  <h1 data-t="title">Restoring the staging database takes 42 minutes</h1>
+  <p data-t="lede">Measured on 2026-10-02 from the 03:00 snapshot. Copying the volume takes 31 of those minutes.</p>
+  <table>
+    <thead><tr><th data-t="th-step">Step</th><th class="n" data-t="th-min">Minutes</th></tr></thead>
+    <tbody>
+      <tr><td data-t="row-copy">Snapshot copy</td><td class="n" translate="no">31</td></tr>
+      <tr><td data-t="row-restore">Instance restore</td><td class="n" translate="no">9</td></tr>
+      <tr><td data-t="row-dns">Internal DNS switch</td><td class="n" translate="no">2</td></tr>
+    </tbody>
+  </table>
+  <p class="callout" data-t="callout">A snapshot older than 24 hours loses that day's writes: check its date before you start.</p>
+</main>
+<footer data-t="footer">Staging restore runbook, reviewed on 2026-10-02.</footer>
+
+<script type="application/json" id="i18n">{
+  "en": {
+    "meta-title": "Restoring the staging database takes 42 minutes",
+    "nav-aria": "Language",
+    "eyebrow": "Restore runbook",
+    "title": "Restoring the staging database takes 42 minutes",
+    "lede": "Measured on 2026-10-02 from the 03:00 snapshot. Copying the volume takes 31 of those minutes.",
+    "th-step": "Step",
+    "th-min": "Minutes",
+    "row-copy": "Snapshot copy",
+    "row-restore": "Instance restore",
+    "row-dns": "Internal DNS switch",
+    "callout": "A snapshot older than 24 hours loses that day's writes: check its date before you start.",
+    "footer": "Staging restore runbook, reviewed on 2026-10-02."
+  },
+  "pt": {
+    "meta-title": "Restore do banco de staging leva 42 minutos",
+    "nav-aria": "Idioma",
+    "eyebrow": "Runbook de restore",
+    "title": "Restore do banco de staging leva 42 minutos",
+    "lede": "Medido em 2026-10-02, com o snapshot das 03:00. A cópia do volume ocupa 31 desses minutos.",
+    "th-step": "Etapa",
+    "th-min": "Minutos",
+    "row-copy": "Cópia do snapshot",
+    "row-restore": "Restore da instância",
+    "row-dns": "Troca do DNS interno",
+    "callout": "Snapshot mais velho que 24 horas perde as escritas do dia: confira a data antes de começar.",
+    "footer": "Runbook de restore de staging, revisado em 2026-10-02."
+  }
+}</script>
+<script>
+(function(){
+  var KEY = "writing-language", data = {};
+  try { data = JSON.parse(document.getElementById("i18n").textContent); } catch (e) {}
+  var langs = (document.documentElement.getAttribute("data-languages") || "").split(/[\s,]+/).filter(Boolean);
+  var nodes = [].slice.call(document.querySelectorAll("[data-t]"));
+  var aria = [].slice.call(document.querySelectorAll("[data-t-aria]"));
+  var buttons = [].slice.call(document.querySelectorAll(".langbar [data-lang]"));
+  function valid(l){ return langs.indexOf(l) !== -1; }
+  function initial(){
+    var h = (location.hash || "").slice(1).toLowerCase();
+    if (valid(h)) return h;
+    try { var q = (new URLSearchParams(location.search).get("lang") || "").toLowerCase(); if (valid(q)) return q; } catch (e) {}
+    try { var s = localStorage.getItem(KEY); if (valid(s)) return s; } catch (e) {}
+    return langs[0];
+  }
+  function apply(lang){
+    var t = data[lang] || {};
+    nodes.forEach(function(el){ var v = t[el.getAttribute("data-t")]; if (typeof v === "string") el.textContent = v; });
+    aria.forEach(function(el){ var v = t[el.getAttribute("data-t-aria")]; if (typeof v === "string") el.setAttribute("aria-label", v); });
+    document.documentElement.lang = lang === "pt" ? "pt-BR" : lang;
+    buttons.forEach(function(b){ b.setAttribute("aria-pressed", String(b.getAttribute("data-lang") === lang)); });
+  }
+  buttons.forEach(function(b){
+    b.addEventListener("click", function(){
+      var l = b.getAttribute("data-lang");
+      try { localStorage.setItem(KEY, l); } catch (e) {}
+      // The hash beats storage on open, so it follows the click: a shared link keeps the language.
+      try { history.replaceState(null, "", location.pathname + location.search + "#" + l); } catch (e) {}
+      apply(l);
+    });
+  });
+  window.addEventListener("hashchange", function(){ var h = location.hash.slice(1).toLowerCase(); if (valid(h)) apply(h); });
+  apply(initial());
+})();
+</script>
+</body>
+</html>

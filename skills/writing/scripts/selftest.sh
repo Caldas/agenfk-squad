@@ -124,10 +124,14 @@ grep_out "  reports a dropped fact"           "MISSING"
 grep_out "  reports an invented fact"         "INVENTED"
 grep_out "  reports an edited code block" "code_block"
 
-# Rendered artifacts: the neutral and the complete bilingual page pass; a
-# bilingual page missing half of a language, a toggle without data-languages, a
-# local image or a page without :root tokens does not.
+# Rendered artifacts: the shipped templates, the neutral and the complete
+# bilingual page pass as they are; a bilingual page missing half of a language,
+# a toggle without data-languages, a local image, a page without :root tokens or
+# a page that uses var(--ds-*) without pasting the block does not.
 A=fixtures/artifacts
+T=templates
+check "artifact check passes the neutral template"   0 python3 -I -B scripts/artifact_check.py $T/document.html
+check "artifact check passes the bilingual template" 0 python3 -I -B scripts/artifact_check.py $T/document-bilingual.html
 check "artifact check passes the bilingual page"     0 python3 -I -B scripts/artifact_check.py $A/bilingual.html
 check "artifact check passes the neutral page"       0 python3 -I -B scripts/artifact_check.py $A/neutral.html
 check "artifact check fails the incomplete bilingual page" 1 python3 -I -B scripts/artifact_check.py $A/bilingual-incomplete.html
@@ -137,12 +141,28 @@ BROKEN=$(mktemp "${TMPDIR:-/tmp}/writing-artifact.XXXXXX.html")
 sed 's/ data-languages="pt en"//' $A/bilingual.html > "$BROKEN"
 check "artifact check fails a toggle with no data-languages" 1 python3 -I -B scripts/artifact_check.py "$BROKEN"
 grep_out "  names the languages rule"            "FAIL languages"
-sed 's|<h1>|<img src="assets/logo.svg" alt="x"><h1>|' $A/neutral.html > "$BROKEN"
+sed 's/ data-languages="en pt"//' $T/document-bilingual.html > "$BROKEN"
+check "  same on the bilingual template"         1 python3 -I -B scripts/artifact_check.py "$BROKEN"
+grep_out "    names the languages rule"          "FAIL languages"
+sed 's/<html lang="en"/<html lang="pt-BR"/' $T/document-bilingual.html > "$BROKEN"
+check "bilingual template opening in the wrong language" 1 python3 -I -B scripts/artifact_check.py "$BROKEN"
+grep_out "  names the initial-language rule"     "FAIL initial-language"
+sed 's/^html.render .langbar{display:none!important}$//' $T/document-bilingual.html > "$BROKEN"
+check "bilingual template without the export rule" 1 python3 -I -B scripts/artifact_check.py "$BROKEN"
+grep_out "  names the export rule"               "FAIL export"
+sed 's|<h1>|<img src="assets/logo.svg" alt="x"><h1>|' $T/document.html > "$BROKEN"
 check "artifact check fails a local image"      1 python3 -I -B scripts/artifact_check.py "$BROKEN"
 grep_out "  names the local-image rule"          "FAIL local-image"
 sed 's/:root/body/g' $A/neutral.html > "$BROKEN"
 check "artifact check fails a page without :root tokens" 1 python3 -I -B scripts/artifact_check.py "$BROKEN"
 grep_out "  names the tokens rule"               "FAIL tokens"
+# The template's --ds-* block removed while the semantic layer still reads it.
+awk '/^\/\* Design system: paste here/{skip=1} /^\/\* Semantic tokens/{skip=0} !skip' $T/document.html > "$BROKEN"
+check "template using var(--ds-*) without the block" 1 python3 -I -B scripts/artifact_check.py "$BROKEN"
+grep_out "  names the ds-contract rule"          "FAIL ds-contract"
+sed 's|<title>[^<]*</title>|<title></title>|' $T/document.html > "$BROKEN"
+check "template with an empty title"             1 python3 -I -B scripts/artifact_check.py "$BROKEN"
+grep_out "  names the title rule"                "FAIL title"
 rm -f "$BROKEN"
 
 [ "$fail" -eq 0 ] && echo && echo "selftest: all checks passed" || { echo; echo "selftest: FAILED"; }
