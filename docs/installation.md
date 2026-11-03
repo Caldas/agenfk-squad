@@ -330,9 +330,8 @@ directory if you want it gone.
 
 - **No herdr.** There is no herdr on Windows, so the automatic session
   switch does not run. The watcher still orders the handoff and writes it;
-  you type `/clear` and then `/clear-pickup pickup`. `MERGE TURN` reaches a
-  queued session on its next prompt. Everything else in the watcher is the
-  same.
+  you type `/clear` and then `/clear-pickup pickup`. Everything else in the
+  watcher is the same.
 - **No chmod.** The squad's state under `%USERPROFILE%\.claude\squad` is
   protected by your profile's folder permissions (ACLs), not by mode bits:
   the `0600` and `0700` the Linux hooks set are not applied, and the
@@ -364,10 +363,13 @@ directory if you want it gone.
   ```
 
   A fresh clone is already right.
-- **Detached helpers.** The session switch and the merge-queue helper start
-  as detached processes, without a console window. If a tool runs your
-  terminal inside a job object that kills its children when it closes, a
-  helper dies with the window.
+- **Detached helpers.** The session switch starts as a detached process,
+  without a console window. If a tool runs your terminal inside a job object
+  that kills its children when it closes, the helper dies with the window.
+- **Not yet verified on Windows:** the board heartbeat
+  (`skills/board-heartbeat`), the heavy review (`hooks/squad-review.py`) and
+  the merge seal (`hooks/squad-seal.py`, `git config squad.seal`). Their
+  tests say so and exit 0 on Windows. Leave the seal off there.
 
 ### WSL
 

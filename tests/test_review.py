@@ -16,6 +16,12 @@ import subprocess
 import sys
 import tempfile
 
+if os.name == "nt":
+    # its fakes of git, gh and agenfk are executable scripts on PATH, which Windows does not run by name;
+    # squad-review (HEAVY_REVIEW) is not yet verified on Windows (docs/installation.md, Windows limits)
+    print("skipped: squad-review (HEAVY_REVIEW) is not yet verified on Windows")
+    sys.exit(0)
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPT = os.path.join(ROOT, "hooks", "squad-review.py")
 CARD = "c0ffee00-0000-4000-8000-000000000001"
@@ -37,12 +43,6 @@ print(json.dumps({{"id": {CARD!r}, "title": "Widget answers", "status": "IN_PROG
 # prints noise on stdout.
 FAKE_REVIEWER = """#!/usr/bin/env python3
 import json, os, re, sys, time
-
-if os.name == "nt":
-    # its fakes of git, gh and agenfk are executable scripts on PATH, which Windows does not run by name;
-    # squad-review (HEAVY_REVIEW) is not yet verified on Windows (docs/installation.md, Windows limits)
-    print("skipped: squad-review (HEAVY_REVIEW) is not yet verified on Windows")
-    sys.exit(0)
 log = os.environ["FAKE_LOG"]
 prompt = sys.stdin.read()
 with open(log, "w") as fh:
