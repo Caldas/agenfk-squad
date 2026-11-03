@@ -25,7 +25,7 @@ python3 .../session_context.py --session <id> --detail
 
 | Indicator | How it is measured | Threshold |
 |---|---|---|
-| **ctx** | tokens of the last turn (input + cache read + cache written) ÷ window | 50% = floor (handoff if reread ≥ 60%); 80% = HANDOFF |
+| **ctx** | tokens of the last turn (input + cache read + cache written) ÷ window | 70% = floor (handoff if reread ≥ 60%, rising to 90% with zero burn); 90% = HANDOFF |
 | **burn** | input + 1.25·cache-write + 0.1·cache-read + 5·output (cockpit weights) | relative: compare sessions |
 | **reread** | share of the burn that is cache reread | informational |
 | **r/new** | weighted reread ÷ new work (input + 1.25·write + 5·output) | decides nothing on its own; the rule is the one on the **reread** row |

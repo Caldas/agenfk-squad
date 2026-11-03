@@ -22,10 +22,20 @@ back).
   Stop              main session at handoff level: if it stopped without writing
                     the handoff, the order is sent back; if it stops again
                     without it, the watcher writes the handoff itself (git, the
-                    owner's last request, denied dispatches). With a handoff and
-                    nothing running in the background, it launches
-                    squad-switch.py, which clears the herdr pane and calls the
-                    pickup, so the session switch happens without the owner.
+                    owner's last request, denied dispatches). With the handoff
+                    written, it launches squad-switch.py, which clears the herdr
+                    pane and calls the pickup, so the session switch happens
+                    without the owner. A handoff written before the owner's last
+                    request is stale: the session is asked for a new one.
+                    With a background task still running (shell, monitor,
+                    sub-agent) the switch is not dropped: it is scheduled
+                    (SQUAD_SWITCH_WAIT, 600 s, for a shell; SQUAD_SWITCH_WAIT_AGENT,
+                    2400 s, for a sub-agent) and goes out when the task comes back
+                    and the session stops again, or when the deadline passes with
+                    the pane idle; the tasks still running then are noted at the
+                    end of the handoff copy. A task result that arrives after the
+                    handoff was written: the session is told to rewrite the
+                    handoff with it, once, before the switch.
                     SQUAD_SWITCH=0 turns the switch off.
   PreCompact        main session only, manual or auto: before the conversation is
                     summarized, writes the same minimal handoff to
@@ -49,22 +59,24 @@ Thresholds, by environment variable:
   SQUAD_WINDOW                  window of the main session (default: 1000000)
   SQUAD_CTX_BASE      (40000)   context of a fresh session, for the payback
   The main session's handoff (level 2) is arithmetic, with no judgement by the agent:
-      context >= SQUAD_CTX_PCT (80)% of the window, OR
+      context >= SQUAD_CTX_PCT (90)% of the window, OR
       reread >= SQUAD_REREAD (60)% AND context >= floor
       (reread = 0.1*cache-read / weighted burn, the cockpit's REREAD %; minimum floor 2*CTX_BASE)
-  The floor weighs the burn: SQUAD_REREAD_FLOOR (50)% of the window once the burn
+  The floor weighs the burn: SQUAD_REREAD_FLOOR (70)% of the window once the burn
   has reached SQUAD_BURN_FULL (50)% of the session budget (CLAUDE_SESSION_BUDGET,
-  20M, the cockpit's BURN %), rising in a straight line to 80% with zero burn.
-  Context at 50% with burn at 10% is NOT handoff time: the floor there is 74%. A
+  20M, the cockpit's BURN %), rising in a straight line to 90% with zero burn.
+  Context at 70% with burn at 10% is NOT handoff time: the floor there is 86%. A
   session that has just built its context and barely used it is not cut.
-  In other words: the cut falls between 50% and 80% of the window. Above 50%
+  In other words: the cut falls between 70% and 90% of the window. Above 70%
   without the math closing, only an informational notice goes out (level 1),
-  with no order to stop.
+  with no order to stop. (Up to October 2026 it was 50-80%, with a forced
+  handoff for no orchestrator slot from 120k up: sessions cut at 12-51% of
+  the window.)
   SQUAD_CTX_WARN (0) SQUAD_CTX_HANDOFF (0)  absolute thresholds in tokens, off by default
-  SQUAD_CTX_CEILING (600000)    above this, dispatch denied and handoff ordered
-  SQUAD_MAX_SUBS      (40)      sub-sessions per main session
-  SQUAD_MAX_ORCH      (3)       sessions orchestrating sub-agents at the same time
-  SQUAD_ORCH_HERE     (120000)  no orchestrator slot: below this the card is done
+  SQUAD_CTX_CEILING (800000)    above this, dispatch denied and handoff ordered
+  SQUAD_MAX_SUBS      (60)      sub-sessions per main session
+  SQUAD_MAX_ORCH      (6)       sessions orchestrating sub-agents at the same time
+  SQUAD_ORCH_HERE     (500000)  no orchestrator slot: below this the card is done
                                 in the session itself; from here up, handoff with
                                 the plan and a new session
   SQUAD_MAX_REVIEWS   (6)       reviewer dispatches for the same card
@@ -176,12 +188,14 @@ CTX_CUT = env_int("SQUAD_SUB_CTX_CUT", 180_000)
 BURN_WARN = env_int("SQUAD_SUB_BURN", 2_000_000)
 MAIN_WARN = env_int("SQUAD_CTX_WARN", 0)         # 0 = no absolute threshold; only the % of the window applies
 MAIN_HANDOFF = env_int("SQUAD_CTX_HANDOFF", 0)
-MAIN_CEIL = env_int("SQUAD_CTX_CEILING", 600_000)
-MAIN_PCT = min(max(env_int("SQUAD_CTX_PCT", 80), 10), 100)       # % of the window at which the handoff goes out regardless
-MAX_SUBS = env_int("SQUAD_MAX_SUBS", 40)
-MAX_ORCH = env_int("SQUAD_MAX_ORCH", 3)
+MAIN_CEIL = env_int("SQUAD_CTX_CEILING", 800_000)
+MAIN_PCT = min(max(env_int("SQUAD_CTX_PCT", 90), 10), 100)       # % of the window at which the handoff goes out regardless
+MAX_SUBS = env_int("SQUAD_MAX_SUBS", 60)
+MAX_ORCH = env_int("SQUAD_MAX_ORCH", 6)
 MAX_REV = env_int("SQUAD_MAX_REVIEWS", 6)
-ORCH_HERE = env_int("SQUAD_ORCH_HERE", 120_000)
+ORCH_HERE = env_int("SQUAD_ORCH_HERE", 500_000)
+SWITCH_SHELL = env_int("SQUAD_SWITCH_WAIT", 600)            # s: the switch waits for a background shell/monitor
+SWITCH_AGENT = env_int("SQUAD_SWITCH_WAIT_AGENT", 2400)     # s: ...and for a sub-agent still running
 DISPATCH = {"Agent", "Task"}
 REVIEWER = re.compile(r"verif|review|revis|segur|secur|audit|advers", re.I)
 CARD = re.compile(r"\b(?:[A-Z][A-Z0-9]{1,6}-\d+[a-z]?|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b")
@@ -204,6 +218,9 @@ CD = re.compile(r"(?:^|(?P<sep>&&|\|\||[;&|(\n{\"']|\b(?:then|else|do)\b))[ \t]*
 CD_WORD = re.compile(r"(?<![\w.~/\\-])cd(?=[\s;&|)\"']|$)")     # every cd, `builtin cd` too
 ELSEWHERE = re.compile(r"\bGIT_(?:DIR|WORK_TREE)=|--git-dir\b|--work-tree\b|\benv\b[^;&|\n]*[ \t]-C\b|\b(?:pushd|popd)\b")
 LITERAL_DIR = re.compile(r"[A-Za-z0-9._/~+,@%=-]+")
+# Git Bash on Windows: C:/work/repo, or /c/work/repo. A backslash path is not literal: bash reads \ as an escape.
+WIN_DIR = re.compile(r"[A-Za-z]:/[A-Za-z0-9._/~+,@%=-]*")
+MSYS_DRIVE = re.compile(r"/([A-Za-z])(?=/|$)")
 TURN_CLI = re.compile(AT + r"(?:\S*/)?squad-turn(?:\.py)?\s+(request|release|status)\b(?:\s+#?(\d+))?")
 # What merge_text() may treat as data. Anything else on the line, or any doubt, counts as code.
 OPAQUE = re.compile(r"\$[({'\[]|`|[<>]\(|<<")      # substitutions, ANSI-C quotes, heredocs
@@ -949,8 +966,10 @@ def run_dir(text, end, cwd, dirs=()):
             return None
     for words in [m.group("arg").split()[:1] or ["~"] for m in cds] + [[d] for d in dirs]:
         w = words[0]
-        if w == "-" or not LITERAL_DIR.fullmatch(w):
+        if w == "-" or not (LITERAL_DIR.fullmatch(w) or (WINDOWS and WIN_DIR.fullmatch(w))):
             return None
+        if WINDOWS:
+            w = MSYS_DRIVE.sub(lambda m: m.group(1).upper() + ":", w, count=1) if MSYS_DRIVE.match(w) else w
         w = os.path.expanduser(w)
         if not os.path.isabs(w) and not where:
             return None
@@ -1779,9 +1798,82 @@ def early_handoff(p, path, st):
         "PROACTIVE HANDOFF or DISPATCH DENIED arrives from the watcher, or when the owner asks.")}))
 
 
+AGENT_TASKS = {"local_agent", "remote_agent", "in_process_teammate", "local_workflow"}
+DONE_TASK = {"completed", "failed", "killed", "stopped", "cancelled", "canceled", "done", "error"}
+
+
+def running(p):
+    """Background tasks still alive, from the Stop's background_tasks field
+    (id, type, status, description and command|agent_type, in Claude Code 2.1.30x)."""
+    out = []
+    for t in p.get("background_tasks") or []:
+        t = t if isinstance(t, dict) else {"description": str(t)}
+        if str(t.get("status") or "running").lower() in DONE_TASK:
+            continue
+        out.append({"id": safe(t.get("id")), "type": safe(t.get("type")) or "?",
+                    "what": ctx_lib().clean(t.get("description") or t.get("command") or t.get("agent_type") or "", 120)})
+    return out
+
+
+def news_after(transcript, handoff):
+    """Background-task results that arrived AFTER the last Write of the handoff:
+    what they brought is not in the file the new session is going to read."""
+    try:
+        with open(transcript, "rb") as fh:
+            fh.seek(0, 2)
+            fh.seek(max(0, fh.tell() - 3_000_000))
+            lines = fh.read().split(b"\n")
+    except OSError:
+        return 0
+    n = 0
+    for raw in reversed(lines):
+        if b'"Write"' in raw and handoff.encode() in raw and b'"assistant"' in raw:
+            return n
+        if b"<task-notification>" not in raw or b'"user"' not in raw:
+            continue
+        try:
+            rec = json.loads(raw)
+        except ValueError:
+            continue
+        c = (rec.get("message") or {}).get("content")
+        text = c if isinstance(c, str) else " ".join(
+            str(b.get("text") or "") for b in (c or []) if isinstance(b, dict))
+        if rec.get("type") == "user" and text.lstrip().startswith("<task-notification>"):
+            n += 1
+    return 0                               # the handoff Write left the window read: nothing to claim
+
+
+def spawn(*args):
+    subprocess.Popen([sys.executable, *args], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, **detached_kwargs())
+
+
+def here(name):
+    return os.path.join(os.path.dirname(os.path.realpath(__file__)), name)
+
+
+def switch_note(session, tasks):
+    """What was still running when the switch went out: appended to the end of the handoff copy."""
+    if not tasks:
+        return ""
+    path = os.path.join(STATE, f"{safe(session)}.switch-note.md")
+    lines = ["", "## Watcher's note at the switch", "",
+             "These background tasks were still running when the session was switched; their result is "
+             "NOT in this handoff. Sub-agent: check in its worktree's git what landed (wip commit) and "
+             "redispatch only what is missing. Shell: run it again if the result matters.", ""]
+    lines += [f"- `{t['type']}` {t['id']}: {t['what'] or '(no description)'}" for t in tasks]
+    try:
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
+    except OSError:
+        return ""
+    return path
+
+
 def stop(p):
     """The main session stopped. At handoff level, either it writes the handoff,
-    or (already written) the session switch is launched."""
+    or (already written) the session switch is launched: now, or scheduled when
+    a background task is still running."""
     if p.get("agent_id"):
         return
     session = p["session_id"]
@@ -1790,40 +1882,67 @@ def stop(p):
     if st.get("ctx_level", 0) < 2 and not st.get("switched"):
         early_handoff(p, path, st)
         return
+    if p.get("squad_rearm"):              # squad-switch gave up before clearing: the next Stop decides again
+        if st.pop("switched", None):
+            save(path, st)
+        return
     if st.get("switched"):
         return
-    if p.get("background_tasks"):         # something is still going to wake this session
-        return
+    expired = bool(p.get("squad_wait_expired"))       # called by squad-switch: nobody reads a block
+    tasks = running(p)
     if not st.get("alert_ts"):            # state without the alert time: only a handoff written from now on counts
         st["alert_ts"] = time.time()
         save(path, st)
-    since = st["alert_ts"]
-    ho = own_handoff(str(p.get("transcript_path") or ""), since, harness(p))
+    # a handoff written before the owner's last request is stale: the new request is not in it
+    # (+5: own_handoff tolerates 5 s of clock skew; against the owner's request the check is strict)
+    since = max(st["alert_ts"], (st.get("prompt_ts") or 0) + 5)
+    transcript = str(p.get("transcript_path") or "")
+    ho = own_handoff(transcript, since, harness(p))
     if not ho:
-        if not st.get("nudges") or (not p.get("stop_hook_active") and st["nudges"] < 2):
+        if not expired and (not st.get("nudges") or (not p.get("stop_hook_active") and st["nudges"] < 2)):
             st["nudges"] = st.get("nudges", 0) + 1
             save(path, st)
             print(json.dumps({"decision": "block", "reason": (
                 "[squad-watch] This session is at HANDOFF level and stopped without writing the handoff. "
                 "Before stopping: comment on the card (`agenfk comment`), write the handoff with mode A of the "
                 "`clear-pickup` skill (with the Write tool, in a new file) with what remains of the "
-                "current request under Next step, and only then "
-                "end with the path of the file.")}))
+                "current request under Next step" + (
+                    " and, for each background task still running, its id, what it does and where its "
+                    "result lands" if tasks else "") + ", and only then end with the path of the file.")}))
             return
         if not can_switch():
             return
         ho = watch_handoff(p, st)         # nudged and stopped again without it: the watcher takes over
         if not ho:
             return
+    elif not expired and st.get("refreshed") != ho[1] and news_after(transcript, ho[0]):
+        st["refreshed"] = ho[1]           # once per handoff: rewritten or not, the switch goes ahead
+        save(path, st)
+        print(json.dumps({"decision": "block", "reason": (
+            "[squad-watch] A background task came back after the handoff was written: its result is not "
+            f"in {ho[0]}. Rewrite the handoff (Write tool, same file) with that result under DONE and the "
+            "Next step adjusted, without starting a new front, and stop.")}))
+        return
     if not can_switch():
         return
     pane = os.environ["HERDR_PANE_ID"]
+    now = time.time()
+    if tasks and not expired:
+        # The live task wakes the session when it ends, and the following Stop
+        # switches. If it never ends (monitor, wait loop, stuck sub-agent),
+        # squad-switch switches at the deadline. One live schedule at a time.
+        st["bg"] = tasks
+        if st.get("switch_wait", 0) <= now:
+            wait = SWITCH_AGENT if any(t["type"] in AGENT_TASKS for t in tasks) else SWITCH_SHELL
+            st["switch_wait"] = now + wait + 1800
+            spawn(here("squad-switch.py"), "wait", pane, session, transcript,
+                  str(p.get("cwd") or ""), str(wait))
+        save(path, st)
+        return
     st["switched"] = True
     save(path, st)
-    switch = os.path.join(os.path.dirname(os.path.realpath(__file__)), "squad-switch.py")
-    subprocess.Popen([sys.executable, switch, pane, session, ho[0], ho[1]], stdin=subprocess.DEVNULL,
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                     **detached_kwargs())
+    note = switch_note(session, st.get("bg") if expired else [])
+    spawn(here("squad-switch.py"), pane, session, ho[0], ho[1], *([note] if note else []))
 
 
 def precompact(p):

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""The watcher cuts the main session between 50% and 80% of the window, and only by arithmetic.
+"""The watcher cuts the main session between 70% and 90% of the window, and only by arithmetic;
+it switches the session even with a background task running.
 
 Self-checking: the exit code is the verdict. Runs in a throwaway HOME, with a
 fake herdr, and never touches ~/.claude.
@@ -24,6 +25,11 @@ M = 1_000_000
 
 def home():
     return tempfile.mkdtemp(prefix="watch-")
+
+
+def sh(path):
+    """A path as a shell command holds it: forward slashes (Git Bash reads a backslash as an escape)."""
+    return path.replace("\\", "/") if os.name == "nt" else path
 
 
 def run_proc(h, event, sid, transcript, extra=None, env=None):
@@ -102,29 +108,35 @@ def test_the_math_is_fixed():
     def due(share, ctx, window, burn=60):
         reread = share * burn / 100 * cx.BUDGET
         return cx.handoff_math(int(reread * (1 - share) / share), 0, int(reread / 0.1), 0, ctx, window)["due"]
-    assert cx.REREAD_SHARE == 0.60 and cx.REREAD_FLOOR_PCT == 50 and cx.HANDOFF_NOW == 80
+    assert cx.REREAD_SHARE == 0.60 and cx.REREAD_FLOOR_PCT == 70 and cx.HANDOFF_NOW == 90
     assert not due(0.95, 150_000, M)        # the case that used to cut sessions at 15%
-    assert not due(0.95, 499_000, M)
-    assert due(0.60, 500_000, M)
-    assert not due(0.59, 790_000, M)
+    assert not due(0.95, 510_000, M)        # and the one that cut them at 51% (rule until October 2026)
+    assert not due(0.95, 699_000, M)
+    assert due(0.60, 700_000, M)
+    assert not due(0.59, 890_000, M)
     assert due(0.61, 90_000, 0)             # sub-session: floor 2*CTX_BASE
     assert due(0.61, 90_000, 0, burn=1)     # ...and with no window the burn does not move the floor
-    # the floor weighs the burn: 80% of the window with zero burn, 50% with burn at 50% of the budget
+    # the floor weighs the burn: 90% of the window with zero burn, 70% with burn at 50% of the budget
     assert cx.BUDGET == 20_000_000 and cx.BURN_FULL_PCT == 50
-    assert not due(0.90, 500_000, M, burn=10)   # context 50%, burn 10%: not the time
-    assert not due(0.90, 730_000, M, burn=10) and due(0.90, 740_000, M, burn=10)
-    assert not due(0.90, 640_000, M, burn=25) and due(0.90, 650_000, M, burn=25)
-    assert due(0.90, 500_000, M, burn=80)
+    assert not due(0.90, 700_000, M, burn=10)   # context 70%, burn 10%: not the time
+    assert not due(0.90, 850_000, M, burn=10) and due(0.90, 860_000, M, burn=10)
+    assert not due(0.90, 790_000, M, burn=25) and due(0.90, 800_000, M, burn=25)
+    assert due(0.90, 700_000, M, burn=80)
+    # the floor table at its boundaries: burn 0% -> 90%, 25% -> 80%, 50% and beyond -> 70%
+    def floor(burn_pct):
+        return cx.handoff_math(int(burn_pct / 100 * cx.BUDGET), 0, 0, 0, 500_000, M)["floor"]
+    assert [floor(b) for b in (0, 25, 50, 100)] == [900_000, 800_000, 700_000, 700_000]
+    assert not due(0.90, 699_000, M, burn=50) and due(0.90, 700_000, M, burn=50)
 
 
-def test_cut_between_50_and_80_percent():
+def test_cut_between_70_and_90_percent():
     cases = [  # context, reread, what the watcher says
         (100_000, 0.90, "nothing"), (150_000, 0.90, "nothing"), (300_000, 0.90, "nothing"),
-        (490_000, 0.90, "nothing"),
-        (500_000, 0.60, "PROACTIVE HANDOFF"), (520_000, 0.90, "PROACTIVE HANDOFF"),
-        (520_000, 0.00, "Informational only"), (700_000, 0.50, "Informational only"),
-        (790_000, 0.00, "Informational only"),
-        (800_000, 0.00, "PROACTIVE HANDOFF"), (900_000, 0.30, "PROACTIVE HANDOFF"),
+        (520_000, 0.90, "nothing"), (690_000, 0.90, "nothing"),
+        (700_000, 0.60, "PROACTIVE HANDOFF"), (720_000, 0.90, "PROACTIVE HANDOFF"),
+        (720_000, 0.00, "Informational only"), (850_000, 0.50, "Informational only"),
+        (890_000, 0.00, "Informational only"),
+        (900_000, 0.00, "PROACTIVE HANDOFF"), (950_000, 0.30, "PROACTIVE HANDOFF"),
     ]
     h = home()
     for i, (ctx, share, expected) in enumerate(cases):
@@ -135,11 +147,11 @@ def test_cut_between_50_and_80_percent():
                                               "PROACTIVE HANDOFF": 2}[expected]
 
 
-def test_context_at_50_with_low_burn_is_not_handoff_time():
+def test_context_at_70_with_low_burn_is_not_handoff_time():
     h = home()
-    cases = [(500_000, 10, "Informational only"), (700_000, 10, "Informational only"),
-             (760_000, 10, "PROACTIVE HANDOFF"), (600_000, 25, "Informational only"),
-             (660_000, 25, "PROACTIVE HANDOFF"), (500_000, 60, "PROACTIVE HANDOFF")]
+    cases = [(700_000, 10, "Informational only"), (840_000, 10, "Informational only"),
+             (870_000, 10, "PROACTIVE HANDOFF"), (780_000, 25, "Informational only"),
+             (810_000, 25, "PROACTIVE HANDOFF"), (700_000, 60, "PROACTIVE HANDOFF")]
     for i, (ctx, burn, expected) in enumerate(cases):
         sid = f"aaaabbbb-{i:04d}"
         text = said(run(h, "PostToolUse", sid, session(h, sid, ctx, 0.9, burn)))
@@ -196,7 +208,7 @@ def test_mistyped_threshold_does_not_turn_the_watcher_off():
                 {"SQUAD_CTX_BASE": "40k"}):
         h = home()
         sid = "99999999-0001"
-        got = kind(said(run(h, "PostToolUse", sid, session(h, sid, 850_000, 0.9), env=bad)))
+        got = kind(said(run(h, "PostToolUse", sid, session(h, sid, 920_000, 0.9), env=bad)))
         assert got == "PROACTIVE HANDOFF", (bad, got)
         sid = "99999999-0002"                     # and no value makes the cut early
         assert said(run(h, "PostToolUse", sid, session(h, sid, 60_000, 0.9), env=bad)) == "nothing", bad
@@ -206,13 +218,16 @@ def test_mistyped_threshold_does_not_turn_the_watcher_off():
 def test_handoff_level_with_no_handoff_written_repeats_the_order():
     h = home()
     sid = "eeeeeeee-0001"
-    tr = session(h, sid, 550_000, 0.9)
+    tr = session(h, sid, 750_000, 0.9)
     assert kind(said(run(h, "PostToolUse", sid, tr))) == "PROACTIVE HANDOFF"
     assert kind(said(run(h, "Stop", sid, tr))) == "stopped without writing the handoff"
 
 
-def fake_herdr(h, sid):
-    """Fake herdr: `agent get` returns the pane's session, `/clear` switches the session."""
+def fake_herdr(h, sid, clear_switches=True):
+    """Fake herdr: `agent get` returns the pane's session, `/clear` switches the session
+    (or not, with clear_switches=False: the dialog that holds the pane); keys are logged.
+    pane-session-status sets the agent's status (idle by default); pane-session-fail
+    holds N empty answers (herdr not answering)."""
     cur, sent = os.path.join(h, "pane-session"), os.path.join(h, "pane-prompts")
     with open(cur, "w") as fh:
         fh.write(sid)
@@ -222,12 +237,25 @@ def fake_herdr(h, sid):
 import json, sys
 a = sys.argv[1:]
 if a[:2] == ["agent", "get"]:
+    try:
+        n = int(open({cur!r} + "-fail").read())
+        open({cur!r} + "-fail", "w").write(str(n - 1))
+        if n > 0:
+            sys.exit(1)
+    except OSError:
+        pass
+    try:
+        status = open({cur!r} + "-status").read().strip()
+    except OSError:
+        status = "idle"
     print(json.dumps({{"result": {{"agent": {{"agent_session": {{"value": open({cur!r}).read()}},
-                                           "agent_status": "idle"}}}}}}))
+                                           "agent_status": status}}}}}}))
 elif a[:2] == ["agent", "prompt"]:
     open({sent!r}, "a").write(a[3] + "\\n")
-    if a[3] == "/clear":
+    if a[3] == "/clear" and {clear_switches!r}:
         open({cur!r}, "w").write("ffffffff-9999")
+elif a[:2] == ["agent", "send-keys"]:
+    open({sent!r}, "a").write("KEYS " + " ".join(a[3:]) + "\\n")
 """)
     os.chmod(path, os.stat(path).st_mode | stat.S_IXUSR)
     if os.name == "nt":                  # a shebang does not run on Windows: a .cmd that calls the script does
@@ -242,7 +270,7 @@ def test_ordered_handoff_switches_session_and_calls_the_pickup():
     sid = "abcdef12-0001"
     herdr, sent = fake_herdr(h, sid)
     env = {"HERDR_PANE_ID": "w1:p1", "HERDR_BIN_PATH": herdr}
-    tr = session(h, sid, 550_000, 0.9)
+    tr = session(h, sid, 750_000, 0.9)
     text = said(run(h, "PostToolUse", sid, tr, env=env))
     assert "PROACTIVE HANDOFF" in text and "calls the pickup on its own" in text, text
     handoff = write_handoff(h, tr)
@@ -266,7 +294,7 @@ def test_ordered_handoff_switches_session_and_calls_the_pickup():
 def test_dispatch_denied_at_the_ceiling_arms_the_switch():
     h = home()
     sid = "12345678-0001"
-    tr = session(h, sid, 620_000, 0.0)                   # 62%, low reread: only a notice...
+    tr = session(h, sid, 820_000, 0.0)                   # 82%, low reread: only a notice...
     assert kind(said(run(h, "PostToolUse", sid, tr))) == "Informational only"
     out = run(h, "PreToolUse", sid, tr, {"tool_name": "Agent",
                                          "tool_input": {"subagent_type": "developer", "prompt": "x"}})
@@ -307,9 +335,9 @@ def dispatch(h, sid, tr, agent_type="developer", env=None):
 def test_no_slot_heavy_session_becomes_handoff_with_plan_and_switch():
     h = home()
     sid = "12345678-0003"
-    tr = session(h, sid, 300_000, 0.0)                   # 30%: no context alert at all
+    tr = session(h, sid, 550_000, 0.0)                   # 55%: no context alert at all
     assert said(run(h, "PostToolUse", sid, tr)) == "nothing"
-    orchestrators(h, 3)
+    orchestrators(h, 6)
     out = dispatch(h, sid, tr)
     assert "DISPATCH DENIED" in out and "PLAN of the denied dispatch" in out, out
     assert "without dispatching an agent" in out and "/clear-pickup pickup <file>" in out, out
@@ -334,13 +362,13 @@ def test_no_slot_light_session_implements_here():
     sid = "12345678-0004"
     tr = session(h, sid, 60_000, 0.0)                    # the session that has just done the pickup
     run(h, "PostToolUse", sid, tr)
-    orchestrators(h, 3)
+    orchestrators(h, 6)
     out = dispatch(h, sid, tr)
     assert "RIGHT HERE" in out and "no handoff" in out, out
     st = state(h, sid)
     assert not st.get("ordered") and st.get("ctx_level", 0) == 0 and st["wait_slot"] is True
     assert said(run(h, "PostToolUse", sid, tr)) == "nothing"   # still no slot: silence
-    orchestrators(h, 2)
+    orchestrators(h, 5)
     assert "SLOT FREE" in said(run(h, "PostToolUse", sid, tr))
     assert said(run(h, "PostToolUse", sid, tr)) == "nothing"   # announces once
     assert "DISPATCH DENIED" not in dispatch(h, sid, tr)
@@ -351,7 +379,7 @@ def test_no_slot_reviewer_waits_for_the_slot_without_handoff():
     sid = "12345678-0005"
     tr = session(h, sid, 300_000, 0.0)
     run(h, "PostToolUse", sid, tr)
-    orchestrators(h, 3)
+    orchestrators(h, 6)
     out = dispatch(h, sid, tr, "verifier")
     assert "whoever writes does not approve" in out and "SLOT FREE" in out, out
     st = state(h, sid)
@@ -361,8 +389,8 @@ def test_no_slot_reviewer_waits_for_the_slot_without_handoff():
 def test_notice_ahead_of_the_brake_only_for_whoever_orchestrates():
     h = home()
     sid = "12345678-0006"
-    tr = session(h, sid, 300_000, 0.0)
-    orchestrators(h, 3)
+    tr = session(h, sid, 550_000, 0.0)
+    orchestrators(h, 6)
     assert said(run(h, "PostToolUse", sid, tr)) == "nothing"     # never dispatched: not its concern
     path = os.path.join(h, ".claude", "squad", "watch", f"{sid}.main.json")
     def remeasure():
@@ -378,7 +406,7 @@ def test_notice_ahead_of_the_brake_only_for_whoever_orchestrates():
     assert again == "nothing", again                             # one notice per episode
     orchestrators(h, 0)
     remeasure()
-    orchestrators(h, 3)
+    orchestrators(h, 6)
     assert "DISPATCH NOTICE" in remeasure()                      # the slot came back and went away again
 
 
@@ -407,10 +435,10 @@ def test_session_that_does_not_write_the_handoff_the_watcher_takes_over_and_swit
     sid = "abcdef12-0002"
     herdr, sent = fake_herdr(h, sid)
     env = {"HERDR_PANE_ID": "w1:p1", "HERDR_BIN_PATH": herdr}
-    tr = session(h, sid, 300_000, 0.0)
+    tr = session(h, sid, 550_000, 0.0)
     run(h, "UserPromptSubmit", sid, tr, {"prompt": "deliver card ABC-1"}, env)
     run(h, "PostToolUse", sid, tr, env=env)
-    orchestrators(h, 3)
+    orchestrators(h, 6)
     assert "DISPATCH DENIED" in dispatch(h, sid, tr, env=env)
     assert kind(said(run(h, "Stop", sid, tr, env=env))) == "stopped without writing the handoff"
     assert said(run(h, "Stop", sid, tr, {"stop_hook_active": True}, env)) == "nothing"
@@ -429,6 +457,230 @@ def test_session_that_does_not_write_the_handoff_the_watcher_takes_over_and_swit
     assert "stopped without writing its own" in body and "compacted" not in body, body
     assert f"{sid}-dispatches.md" in body and "UNKNOWN" in body, body
     assert "\n## Next step\n" in body, body
+
+
+SWITCH = os.path.join(ROOT, "hooks", "squad-switch.py")
+SWITCH_LOG = (".claude", "squad", "switches.log")
+
+
+def wait_for(path, text, secs=40):
+    for _ in range(int(secs / 0.25)):
+        if os.path.exists(path):
+            with open(path) as fh:
+                body = fh.read()
+            if text in body:
+                return body
+        time.sleep(0.25)
+    with open(path) if os.path.exists(path) else open(os.devnull) as fh:
+        raise AssertionError(f"{text!r} did not show up in {path}: {fh.read()!r}")
+
+
+def lines(path):
+    if not os.path.exists(path):
+        return []
+    with open(path) as fh:
+        return fh.read().splitlines()
+
+
+def notify(transcript, task="b1"):
+    """A background task's result reaching the session."""
+    with open(transcript, "a") as fh:
+        fh.write(json.dumps({"type": "user", "message": {"role": "user", "content":
+                             f"<task-notification>\n<task-id>{task}</task-id>\n<status>completed</status>"}}) + "\n")
+
+
+def pane_status(h, status):
+    with open(os.path.join(h, "pane-session-status"), "w") as fh:
+        fh.write(status)
+
+
+BG_SHELL = [{"id": "bvtlvn8km", "type": "local_bash", "status": "running",
+             "description": "Wait for quiet", "command": "measure-quiet.sh"}]
+BG_AGENT = [{"id": "a1b2", "type": "local_agent", "status": "running",
+             "description": "DR-15 part 2", "agent_type": "developer"}]
+
+
+def test_background_task_does_not_block_the_switch():
+    """October 2026: handoff written, a shell waiting for the machine to settle
+    stayed alive and the Stop left without a switch. Nobody rearmed it; the owner
+    cleared the pane by hand. Now the switch is scheduled and goes out at the deadline."""
+    h = home()
+    sid = "abcdef12-0003"
+    herdr, sent = fake_herdr(h, sid)
+    env = {"HERDR_PANE_ID": "w1:p1", "HERDR_BIN_PATH": herdr, "SQUAD_SWITCH_WAIT": "1"}
+    tr = session(h, sid, 750_000, 0.9)
+    assert kind(said(run(h, "PostToolUse", sid, tr, env=env))) == "PROACTIVE HANDOFF"
+    handoff = write_handoff(h, tr)
+    assert said(run(h, "Stop", sid, tr, {"background_tasks": BG_SHELL}, env)) == "nothing"
+    st = state(h, sid)
+    assert not st.get("switched") and st["switch_wait"] > time.time() and st["bg"][0]["id"] == "bvtlvn8km"
+    body = wait_for(os.path.join(h, *SWITCH_LOG), "pickup sent")
+    assert "deadline of 0 min passed" in body and "with a note on background tasks" in body, body
+    prompts = lines(sent)
+    assert prompts[0] == "/clear" and prompts[1].startswith("/clear-pickup pickup "), prompts
+    with open(prompts[1].split()[-1]) as fh, open(handoff) as orig:
+        copy, original = fh.read(), orig.read()
+    assert copy.startswith(original) and "Watcher's note at the switch" in copy and "Wait for quiet" in copy, copy
+    assert state(h, sid)["switched"] is True
+
+
+def test_task_that_returns_asks_for_the_handoff_rewritten_and_switches_once():
+    h = home()
+    sid = "abcdef12-0004"
+    herdr, sent = fake_herdr(h, sid)
+    env = {"HERDR_PANE_ID": "w1:p1", "HERDR_BIN_PATH": herdr, "SQUAD_SWITCH_WAIT_AGENT": "8"}
+    tr = session(h, sid, 750_000, 0.9)
+    run(h, "PostToolUse", sid, tr, env=env)
+    write_handoff(h, tr)
+    assert said(run(h, "Stop", sid, tr, {"background_tasks": BG_AGENT}, env)) == "nothing"
+    # the same Stop again (session woken and stopped, agent still running): one schedule only
+    assert said(run(h, "Stop", sid, tr, {"background_tasks": BG_AGENT}, env)) == "nothing"
+    notify(tr, "a1b2")                                     # the sub-agent came back after the handoff
+    out = said(run(h, "Stop", sid, tr, {"background_tasks": []}, env))
+    assert "A background task came back" in out and "Rewrite the handoff" in out, out
+    write_handoff(h, tr, "h1.md")                          # rewritten: the switch goes out now
+    assert said(run(h, "Stop", sid, tr, {"background_tasks": []}, env)) == "nothing"
+    wait_for(os.path.join(h, *SWITCH_LOG), "pickup sent")
+    time.sleep(10)                                         # the schedule expires and sees the switch done
+    assert lines(sent).count("/clear") == 1, lines(sent)
+    with open(lines(sent)[1].split()[-1]) as fh:
+        assert "Watcher's note" not in fh.read()
+
+
+def test_clear_that_does_not_switch_the_session_gets_escape():
+    h = home()
+    sid = "abcdef12-0005"
+    herdr, sent = fake_herdr(h, sid, clear_switches=False)
+    env = {"HERDR_PANE_ID": "w1:p1", "HERDR_BIN_PATH": herdr}
+    tr = session(h, sid, 750_000, 0.9)
+    run(h, "PostToolUse", sid, tr, env=env)
+    write_handoff(h, tr)
+    assert said(run(h, "Stop", sid, tr, env=env)) == "nothing"
+    assert "Escape sent" in wait_for(os.path.join(h, *SWITCH_LOG), "did not change after the /clear")
+    assert "KEYS esc" in lines(sent), lines(sent)
+
+
+def test_session_at_18_percent_with_no_slot_works_here_without_handoff():
+    """October 2026: 183k of context and 3 orchestrators were enough for the
+    watcher to order a stop. Now, below SQUAD_ORCH_HERE (500k), the card is done here."""
+    h = home()
+    sid = "12345678-0008"
+    tr = session(h, sid, 183_000, 0.9)
+    run(h, "PostToolUse", sid, tr)
+    orchestrators(h, 6)
+    out = dispatch(h, sid, tr)
+    assert "RIGHT HERE" in out and "no handoff" in out, out
+    assert not state(h, sid).get("ordered")
+
+
+def test_owner_request_after_the_handoff_outweighs_the_handoff():
+    """The owner wrote after the handoff; switching with the old handoff would
+    lose the new request. The session is told to write another one."""
+    h = home()
+    sid = "abcdef12-0006"
+    herdr, sent = fake_herdr(h, sid)
+    env = {"HERDR_PANE_ID": "w1:p1", "HERDR_BIN_PATH": herdr}
+    tr = session(h, sid, 750_000, 0.9)
+    run(h, "PostToolUse", sid, tr, env=env)
+    write_handoff(h, tr)
+    time.sleep(0.05)
+    run(h, "UserPromptSubmit", sid, tr, {"prompt": "before stopping, open the PR for card ABC-2"}, env)
+    assert kind(said(run(h, "Stop", sid, tr, env=env))) == "stopped without writing the handoff"
+    assert not state(h, sid).get("switched") and lines(sent) == []
+
+
+def test_switch_gives_up_and_rearms_if_the_session_woke_up():
+    h = home()
+    sid = "abcdef12-0007"
+    herdr, sent = fake_herdr(h, sid)
+    env = {"HERDR_PANE_ID": "w1:p1", "HERDR_BIN_PATH": herdr}
+    tr = session(h, sid, 750_000, 0.9)
+    run(h, "PostToolUse", sid, tr, env=env)
+    write_handoff(h, tr)
+    pane_status(h, "working")                              # woke up between the Stop and the switch
+    assert said(run(h, "Stop", sid, tr, env=env)) == "nothing"
+    log = os.path.join(h, *SWITCH_LOG)
+    wait_for(log, "switch rearmed")
+    for _ in range(40):
+        if not state(h, sid).get("switched"):
+            break
+        time.sleep(0.25)
+    assert not state(h, sid).get("switched") and "/clear" not in lines(sent)
+    pane_status(h, "idle")                                 # stopped again: now it switches
+    assert said(run(h, "Stop", sid, tr, env=env)) == "nothing"
+    wait_for(log, "pickup sent")
+    assert lines(sent).count("/clear") == 1
+
+
+def test_wait_survives_a_transient_herdr_failure():
+    h = home()
+    sid = "abcdef12-0008"
+    herdr, sent = fake_herdr(h, sid)
+    with open(os.path.join(h, "pane-session-fail"), "w") as fh:
+        fh.write("3")
+    env = {"HERDR_PANE_ID": "w1:p1", "HERDR_BIN_PATH": herdr, "SQUAD_SWITCH_WAIT": "2"}
+    tr = session(h, sid, 750_000, 0.9)
+    run(h, "PostToolUse", sid, tr, env=env)
+    write_handoff(h, tr)
+    assert said(run(h, "Stop", sid, tr, {"background_tasks": BG_SHELL}, env)) == "nothing"
+    body = wait_for(os.path.join(h, *SWITCH_LOG), "pickup sent")
+    assert "wait undone" not in body, body
+
+
+def test_wait_exits_when_herdr_never_answers_again():
+    """A closed pane or herdr down must not keep the waiting process alive forever."""
+    h = home()
+    e = dict(os.environ, HOME=h, HERDR_BIN_PATH="/bin/false", SQUAD_SWITCH_BUSY="2")
+    t0 = time.time()
+    r = subprocess.run([sys.executable, SWITCH, "wait", "w1:p1", "abcdef12-0009", "/x/t.jsonl", "/x", "1"],
+                       env=e, capture_output=True, text=True, timeout=60)
+    assert r.returncode == 1 and time.time() - t0 < 60
+    with open(os.path.join(h, *SWITCH_LOG)) as fh:
+        assert "herdr silent" in fh.read()
+
+
+def test_the_claim_refuses_a_second_switch_of_the_same_session():
+    """One switch per session: the second process that tries to clear the same
+    session finds the claim and gives up before the /clear."""
+    import hashlib
+    h = home()
+    sid = "abcdef12-0010"
+    herdr, sent = fake_herdr(h, sid)
+    handoff = write_handoff(h, session(h, sid, 750_000, 0.9))
+    with open(handoff, "rb") as fh:
+        digest = hashlib.sha256(fh.read()).hexdigest()
+    e = {k: v for k, v in os.environ.items() if not k.startswith(("SQUAD_", "HERDR_"))}
+    e.update(HOME=h, HERDR_BIN_PATH=herdr)
+    def switch():
+        return subprocess.run([sys.executable, SWITCH, "w1:p1", sid, handoff, digest], env=e,
+                              capture_output=True, text=True, timeout=90).returncode
+    assert switch() == 0
+    assert os.path.exists(os.path.join(h, ".claude", "squad", "switches", f"{sid}.claim"))
+    with open(os.path.join(h, "pane-session"), "w") as fh:
+        fh.write(sid)                                      # the same session in the pane again
+    assert switch() == 1
+    log = lines(os.path.join(h, *SWITCH_LOG))
+    assert any("another switch of abcdef12 is already under way" in ln for ln in log), log
+    assert lines(sent).count("/clear") == 1, lines(sent)
+
+
+def test_max_orch_and_orch_here_defaults_and_their_overrides():
+    h = home()
+    light, heavy = "12345678-0009", "12345678-0010"
+    tr_light = session(h, light, 490_000, 0.0)             # just below ORCH_HERE (500k)
+    tr_heavy = session(h, heavy, 510_000, 0.0)             # just above it
+    run(h, "PostToolUse", light, tr_light)
+    run(h, "PostToolUse", heavy, tr_heavy)
+    orchestrators(h, 5)                                    # 5 others: the 6th slot is free by default
+    assert "DISPATCH DENIED" not in dispatch(h, light, tr_light)
+    assert "RIGHT HERE" in dispatch(h, light, tr_light, env={"SQUAD_MAX_ORCH": "5"})
+    orchestrators(h, 6)
+    assert "RIGHT HERE" in dispatch(h, light, tr_light)
+    out = dispatch(h, heavy, tr_heavy, env={"SQUAD_ORCH_HERE": "600000"})
+    assert "RIGHT HERE" in out and not state(h, heavy).get("ordered"), out
+    assert "DISPATCH DENIED" not in dispatch(h, heavy, tr_heavy, env={"SQUAD_MAX_ORCH": "7"})
+    out = dispatch(h, heavy, tr_heavy)
+    assert "PLAN of the denied dispatch" in out and state(h, heavy)["ordered"] is True, out
 
 
 def compact_handoff(h, sid):
@@ -494,7 +746,7 @@ def test_compaction_at_handoff_level_never_switches_the_session():
     sid = "c0c0c0c0-0003"
     herdr, sent = fake_herdr(h, sid)
     env = {"HERDR_PANE_ID": "w1:p1", "HERDR_BIN_PATH": herdr}
-    tr = session(h, sid, 550_000, 0.9)
+    tr = session(h, sid, 750_000, 0.9)
     assert kind(said(run(h, "PostToolUse", sid, tr, env=env))) == "PROACTIVE HANDOFF"
     for trigger in ("manual", "auto"):
         r = run_proc(h, "PreCompact", sid, tr, {"trigger": trigger, "custom_instructions": None}, env)
@@ -572,7 +824,7 @@ def test_merge_queue_one_session_at_a_time_and_the_next_is_called():
     a, b = "aaaa1111-0001", "bbbb2222-0001"
     assert bash(h, "PreToolUse", a, repo, "gh pr merge 10 --squash", env) == "nothing"   # turn free: passes
     assert queue(h)[0]["holder"]["session"] == a
-    out = bash(h, "PreToolUse", b, repo, f"cd {repo} && gh pr merge 11 --squash", env)
+    out = bash(h, "PreToolUse", b, repo, f"cd {sh(repo)} && gh pr merge 11 --squash", env)
     assert "MERGE QUEUE" in out and "is merging" in out and "PR #10" in out, out
     assert "queue" not in queue(h)[0] and queue(h)[0]["intents"] == []                    # nobody waits in line
     assert bash(h, "PreToolUse", b, repo, "git fetch origin && git merge origin/main", env) == "nothing"
@@ -687,6 +939,11 @@ pr = prs.get(n) or {{}}
 print(json.dumps(pr) if "-q" not in sys.argv else pr.get(sys.argv[-1][1:], ""))
 """)
     os.chmod(gh, os.stat(gh).st_mode | stat.S_IXUSR)
+    if os.name == "nt":                  # a shebang does not run on Windows: a .cmd that calls the script does
+        launcher = gh + ".cmd"
+        with open(launcher, "w") as fh:
+            fh.write(f'@"{sys.executable}" "{gh}" %*\r\n')
+        gh = launcher
     return repo, {"SQUAD_GH": gh}, prs
 
 
@@ -780,7 +1037,7 @@ def test_turn_status_shows_who_is_merging_and_the_intents():
     repo, env, _ = repo_with_gh(h)
     assert bash(h, "PreToolUse", "eeee1111-0001", repo, "squad-turn request 40", env) == "nothing"
     assert bash(h, "PreToolUse", "ffff2222-0001", repo, f"{GM} 41", env) == "nothing"
-    e = dict(os.environ, HOME=h)
+    e = dict(os.environ, HOME=h, USERPROFILE=h)
     out = subprocess.run([sys.executable, os.path.join(ROOT, "hooks", "squad-turn.py"), "status"], cwd=repo,
                          capture_output=True, text=True, env=e).stdout
     assert "merging now: session ffff2222 (PR #41)" in out and "eeee1111 (PR #40)" in out, out
@@ -848,7 +1105,7 @@ def test_turn_status_compares_against_the_remote_default_branch():
         fh.write("feat\n")
     git(repo, "commit", "-qam", "feat")
     out = subprocess.run([sys.executable, os.path.join(ROOT, "hooks", "squad-turn.py"), "status"], cwd=repo,
-                         capture_output=True, text=True, env=dict(os.environ, HOME=h, **env)).stdout
+                         capture_output=True, text=True, env=dict(os.environ, HOME=h, USERPROFILE=h, **env)).stdout
     assert "feat x origin/beta" in out and "merges without conflict" in out, out
 
 
@@ -861,7 +1118,7 @@ def seal_head(h, repo):
     e = {k: v for k, v in os.environ.items() if not k.startswith(("SQUAD_", "HERDR_"))}
     r = subprocess.run([sys.executable, os.path.join(ROOT, "hooks", "squad-seal.py"), "record", "--card", "c-1",
                         "--model", "m", "--verdict", "SHIP", "--evidence", ev], cwd=repo, capture_output=True,
-                       text=True, env=dict(e, HOME=h))
+                       text=True, env=dict(e, HOME=h, USERPROFILE=h))
     assert r.returncode == 0, r.stderr
     return sha
 
@@ -898,11 +1155,11 @@ def test_merge_and_push_are_checked_where_the_command_runs():
     outside = os.path.join(h, "outside")
     os.makedirs(outside)
     set_prs(prs, **{"5": ("feat", git(repo, "rev-parse", "HEAD"))})
-    for cmd in (f"cd {repo} && git push origin HEAD:beta", f"cd {repo} && {GM} 5", f"cd {repo}; {GM} 5"):
+    for cmd in (f"cd {sh(repo)} && git push origin HEAD:beta", f"cd {sh(repo)} && {GM} 5", f"cd {sh(repo)}; {GM} 5"):
         out = bash(h, "PreToolUse", sid, outside, cmd, env)
         assert "MERGE SEAL" in out and "no seal for that SHA" in out, (cmd, out)
     for cmd in ('git -C "$WT" push origin HEAD:beta', f'cd "$WT" && {GM} 5', f"cd - && {GM} 5",
-                f"(cd {repo} && true) && {GM} 5", f"GIT_DIR={repo}/.git git push origin HEAD:beta"):
+                f"(cd {sh(repo)} && true) && {GM} 5", f"GIT_DIR={sh(repo)}/.git git push origin HEAD:beta"):
         out = bash(h, "PreToolUse", sid, outside, cmd, env)
         assert "MERGE SEAL" in out and "literal path" in out, (cmd, out)
         assert holder(h) is None, cmd
@@ -915,7 +1172,7 @@ def test_merge_and_push_are_checked_where_the_command_runs():
     assert bash(h, "PreToolUse", sid, repo, "git push origin HEAD:beta", env) == "nothing"   # sealed here
     bash(h, "PostToolUse", sid, repo, "git push origin HEAD:beta", env)
     for cmd in ("cd ../wt-x && git push origin HEAD:beta", "git -C ../wt-x push origin HEAD:beta",
-                f"cd {wt} && git push origin HEAD:beta"):
+                f"cd {sh(wt)} && git push origin HEAD:beta"):
         out = bash(h, "PreToolUse", sid, repo, cmd, env)
         assert "MERGE SEAL" in out and "no seal for that SHA" in out, (cmd, out)
     out = bash(h, "PreToolUse", sid, repo, 'cd "$WT" && git push origin HEAD:beta', {**env, "SQUAD_SEAL": "0"})
@@ -929,7 +1186,7 @@ def test_turn_status_uses_squad_trunk_first():
     git(repo, "fetch", "-q", "origin")
     git(repo, "config", "squad.trunk", "release")
     out = subprocess.run([sys.executable, os.path.join(ROOT, "hooks", "squad-turn.py"), "status"], cwd=repo,
-                         capture_output=True, text=True, env=dict(os.environ, HOME=h, **env)).stdout
+                         capture_output=True, text=True, env=dict(os.environ, HOME=h, USERPROFILE=h, **env)).stdout
     assert "feat x origin/release" in out, out
 
 
@@ -946,11 +1203,11 @@ def test_a_cd_that_may_not_run_leaves_the_directory_unknown():
     with open(os.path.join(wt, "a.txt"), "w") as fh:
         fh.write("not reviewed\n")
     git(wt, "commit", "-qam", "unsealed")
-    assert bash(h, "PreToolUse", sid, wt, f"cd {repo}; git push origin HEAD:beta", env) == "nothing"   # sealed there
-    bash(h, "PostToolUse", sid, wt, f"cd {repo}; git push origin HEAD:beta", env)
-    for cmd in (f"false && cd {repo}; git push origin HEAD:beta", f"[ -d /nada ] && cd {repo}; git push origin HEAD:beta",
-                f"cd {wt} || cd {repo}; git push origin HEAD:beta", f"cd {repo} | cat; git push origin HEAD:beta",
-                f"cd {repo} & git push origin HEAD:beta", f"if true; then cd {repo}; fi; git push origin HEAD:beta"):
+    assert bash(h, "PreToolUse", sid, wt, f"cd {sh(repo)}; git push origin HEAD:beta", env) == "nothing"   # sealed there
+    bash(h, "PostToolUse", sid, wt, f"cd {sh(repo)}; git push origin HEAD:beta", env)
+    for cmd in (f"false && cd {sh(repo)}; git push origin HEAD:beta", f"[ -d /nada ] && cd {sh(repo)}; git push origin HEAD:beta",
+                f"cd {sh(wt)} || cd {sh(repo)}; git push origin HEAD:beta", f"cd {sh(repo)} | cat; git push origin HEAD:beta",
+                f"cd {sh(repo)} & git push origin HEAD:beta", f"if true; then cd {sh(repo)}; fi; git push origin HEAD:beta"):
         out = bash(h, "PreToolUse", sid, wt, cmd, env)
         assert "MERGE SEAL" in out and "literal path" in out, (cmd, out)
 
@@ -984,15 +1241,15 @@ def test_an_unknown_directory_is_denied_whatever_the_sessions_repository_says():
     sid = "aeae1111-0001"
     for cmd in (f'cd "$WT_B" && {GM} 5', 'cd "$WT_B" && git push origin HEAD:beta',
                 'cd "$WT_B" && git push origin release', 'cd "$WT_B" && git push --all origin feat/x',
-                f"builtin cd {repo} && git push origin HEAD:beta", f"command cd {repo}; {GM} 5",
-                f"X=1 cd {repo} && git push origin HEAD:beta", 'cd "$WT_B" && git push --mir origin feat/x',
-                f"function f {{ cd {repo}; }}; git push origin HEAD:beta"):
+                f"builtin cd {sh(repo)} && git push origin HEAD:beta", f"command cd {sh(repo)}; {GM} 5",
+                f"X=1 cd {sh(repo)} && git push origin HEAD:beta", 'cd "$WT_B" && git push --mir origin feat/x',
+                f"function f {{ cd {sh(repo)}; }}; git push origin HEAD:beta"):
         out = bash(h, "PreToolUse", sid, repo, cmd, env)
         assert "MERGE SEAL" in out and "literal path" in out, (cmd, out)
         assert holder(h) is None, cmd
     assert bash(h, "PreToolUse", sid, repo, 'cd "$WT_B" && git push origin HEAD:beta',
                 {**env, "SQUAD_SEAL": "0"}) == "nothing"
-    assert bash(h, "PreToolUse", sid, repo, f"cd {repo} && git push origin feat/x", env) == "nothing"
+    assert bash(h, "PreToolUse", sid, repo, f"cd {sh(repo)} && git push origin feat/x", env) == "nothing"
 
 
 def test_turn_status_falls_back_to_master():
@@ -1007,7 +1264,7 @@ def test_turn_status_falls_back_to_master():
     subprocess.run(["git", "-C", repo, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD"], capture_output=True)
     git(repo, "checkout", "-q", "-b", "feat", "origin/master")
     out = subprocess.run([sys.executable, os.path.join(ROOT, "hooks", "squad-turn.py"), "status"], cwd=repo,
-                         capture_output=True, text=True, env=dict(os.environ, HOME=h, **env)).stdout
+                         capture_output=True, text=True, env=dict(os.environ, HOME=h, USERPROFILE=h, **env)).stdout
     assert "feat x origin/master" in out, out
 
 

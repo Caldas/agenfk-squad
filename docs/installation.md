@@ -367,9 +367,16 @@ directory if you want it gone.
   without a console window. If a tool runs your terminal inside a job object
   that kills its children when it closes, the helper dies with the window.
 - **Not yet verified on Windows:** the board heartbeat
-  (`skills/board-heartbeat`), the heavy review (`hooks/squad-review.py`) and
-  the merge seal (`hooks/squad-seal.py`, `git config squad.seal`). Their
-  tests say so and exit 0 on Windows. Leave the seal off there.
+  (`skills/board-heartbeat`), the heavy review (`hooks/squad-review.py`), the
+  merge seal (`hooks/squad-seal.py`, `git config squad.seal`), and the
+  scripts of the cloud-resource pricing guard, the design bridge and the
+  pull-request skill. Their tests say so and exit 0 on Windows. Leave the
+  seal off there.
+- **Paths in a Bash command.** The merge turn follows `cd C:/work/repo` and
+  `cd /c/work/repo`, the forms Git Bash takes. A backslash path
+  (`cd C:\work\repo`) is not followed, because bash reads the backslash as an
+  escape, so the merge or push is denied as one whose directory the watcher
+  cannot tell (unless `SQUAD_SEAL=0`). Write the path with forward slashes.
 
 ### WSL
 

@@ -190,10 +190,27 @@ def test_the_sealed_copy_can_be_made_twice_and_a_changed_handoff_is_refused():
         sws = load_switch(os.path.join(tmp, "copies"))
         first = sws.sealed_copy(original, digest, "abcdef12-0001")
         second = sws.sealed_copy(original, digest, "abcdef12-0001")
-        assert first and first == second, (first, second)
-        with open(first, "rb") as fh:
-            assert fh.read() == body
+        assert first and first == second, (first, second)          # (copy, sha256 of the copy), both times
+        copy, sealed = first
+        with open(copy, "rb") as fh:
+            data = fh.read()
+        assert data == body and hashlib.sha256(data).hexdigest() == sealed
         assert sws.sealed_copy(original, "0" * 64, "abcdef12-0001") is None
+
+
+def test_a_reused_copy_is_handed_back_like_a_new_one():
+    # the Windows branch that reuses the read-only copy, run on any system: same (copy, sha256) as a new copy
+    with tempfile.TemporaryDirectory() as tmp:
+        body = b"# handoff\nNext step: Y\n"
+        original = os.path.join(tmp, "proj", ".claude", "handoffs", "b.md")
+        os.makedirs(os.path.dirname(original))
+        with open(original, "wb") as fh:
+            fh.write(body)
+        sws = load_switch(os.path.join(tmp, "copies"))
+        sws.WINDOWS = True
+        first = sws.sealed_copy(original, hashlib.sha256(body).hexdigest(), "abcdef12-0002")
+        second = sws.sealed_copy(original, hashlib.sha256(body).hexdigest(), "abcdef12-0002")
+        assert isinstance(first, tuple) and first == second, (first, second)
 
 
 def test_without_herdr_the_session_cannot_be_switched():

@@ -27,7 +27,7 @@ measured. `SQUAD_WATCH=0` turns it off.
 | `PostToolUseFailure` | A tool call failed: if it was the merge that held the merge turn, gives the turn back at once instead of waiting for `SQUAD_TURN_HOLD` to expire. |
 | `SubagentStop` | Writes the sub-session's metrics to `metrics.jsonl` and leaves a note for the parent when the sub-session ended badly. |
 | `UserPromptSubmit` | Delivers pending notes to the main session. |
-| `Stop` | Main session at handoff level: if it stopped without writing the handoff, the stop is blocked and the order repeated; if it stops again without one, the watcher writes a minimal handoff itself. With a handoff on disk and nothing running in the background, it launches the session switch. |
+| `Stop` | Main session at handoff level: if it stopped without writing the handoff, the stop is blocked and the order repeated; if it stops again without one, the watcher writes a minimal handoff itself. With a handoff on disk, it launches the session switch; with a background task still running, the switch is scheduled instead (see [The session switch](#the-session-switch)). |
 | `PreCompact` | Main session, `/compact` or auto-compact: before the conversation is summarized, writes the same minimal handoff to `~/.claude/squad/handoffs/<session>-compact.md`. It prints nothing, so it never blocks the compaction, and it never switches the session. |
 
 Reading the transcript is incremental: the watcher keeps a byte offset per
@@ -66,7 +66,7 @@ From a session's running totals it computes (`handoff_math` in
 
 A main session is ordered to hand off (`PROACTIVE HANDOFF`) when either holds:
 
-1. **context ≥ `SQUAD_CTX_PCT`% of the window** (default 80%), or
+1. **context ≥ `SQUAD_CTX_PCT`% of the window** (default 90%), or
 2. **reread share ≥ `SQUAD_REREAD`%** (default 60%) **and context ≥ floor**.
 
 Rule 1 is the wall. Rule 2 is the interesting one.
@@ -79,51 +79,54 @@ waste. So rule 2 only applies above a floor.
 A fixed floor is still wrong. Picture a session that has just loaded 500k
 tokens of context and done almost nothing with it. Its reread share is high
 (it has produced little, so most of its spend is re-reading), and its context
-is at 50% of the window. Cutting it now throws away what it just paid to load.
+is at 70% of the window. Cutting it now throws away what it just paid to load.
 
 So the floor **weighs the burn**. With `window` the session's context window:
 
 ```
-floor_pct = 80 − (80 − 50) × min(1, burn_pct / 50)
+floor_pct = 90 − (90 − 70) × min(1, burn_pct / 50)
 floor     = max(2 × SQUAD_CTX_BASE, window × floor_pct / 100)
 ```
 
-where 80 is `SQUAD_CTX_PCT`, the lower 50 is `SQUAD_REREAD_FLOOR` and the
-divisor 50 is `SQUAD_BURN_FULL`. In words: the floor starts at 80% of the
+where 90 is `SQUAD_CTX_PCT`, 70 is `SQUAD_REREAD_FLOOR` and the
+divisor 50 is `SQUAD_BURN_FULL`. In words: the floor starts at 90% of the
 window for a session that has burned nothing, and falls in a straight line to
-50% once the session has burned half its budget.
+70% once the session has burned half its budget.
 
 For a 1M window and a 20M budget:
 
 | Burn so far | `burn_pct` | Floor |
 |---|---|---|
-| 0 | 0% | 800k (80%) |
-| 2M | 10% | 740k (74%) |
-| 5M | 25% | 650k (65%) |
-| 8M | 40% | 560k (56%) |
-| 10M or more | ≥ 50% | 500k (50%) |
+| 0 | 0% | 900k (90%) |
+| 2M | 10% | 860k (86%) |
+| 5M | 25% | 800k (80%) |
+| 8M | 40% | 740k (74%) |
+| 10M or more | ≥ 50% | 700k (70%) |
+
+Until October 2026 these were 80% and 50%: the handoff went out early enough
+to interrupt work that was still paying for itself.
 
 ### Worked examples
 
-**A. Just loaded, barely used.** Context 500k, burn 2M (10%), reread share 70%.
-Floor is 740k. Context is below the floor, so rule 2 does not fire. Rule 1
-does not fire either (500k < 800k). The session keeps working. It gets at most
+**A. Just loaded, barely used.** Context 700k, burn 2M (10%), reread share 70%.
+Floor is 860k. Context is below the floor, so rule 2 does not fire. Rule 1
+does not fire either (700k < 900k). The session keeps working. It gets at most
 an informational notice, which is not an order to stop.
 
-**B. Same context, long session.** Context 500k, burn 11M (55%), reread share 68%.
-Floor is 500k. Context ≥ floor and share ≥ 60%: `PROACTIVE HANDOFF`. Each
-further turn costs a toll of 50k weighted tokens. A restart costs
-1.25 × 40k + 10k = 60k, and saves 0.1 × (500k − 40k) = 46k per turn, so the
-fresh session pays for itself in 60 / 46 ≈ 1.3 turns.
+**B. Same context, long session.** Context 700k, burn 11M (55%), reread share 68%.
+Floor is 700k. Context ≥ floor and share ≥ 60%: `PROACTIVE HANDOFF`. Each
+further turn costs a toll of 70k weighted tokens. A restart costs
+1.25 × 40k + 10k = 60k, and saves 0.1 × (700k − 40k) = 66k per turn, so the
+fresh session pays for itself in 60 / 66 ≈ 0.9 turns.
 
-**C. Productive session, low reread.** Context 620k, burn 12M, reread share 41%.
-Share is under 60%, so rule 2 does not fire. Context is under 800k, so rule 1
+**C. Productive session, low reread.** Context 820k, burn 12M, reread share 41%.
+Share is under 60%, so rule 2 does not fire. Context is under 900k, so rule 1
 does not fire. The session continues, even though it is large: it is still
 producing more than it re-reads.
 
-**D. The wall.** Context 810k, any burn, any share. Rule 1: `PROACTIVE HANDOFF`.
+**D. The wall.** Context 910k, any burn, any share. Rule 1: `PROACTIVE HANDOFF`.
 
-The cut therefore always falls between 50% and 80% of the window. Above 50%
+The cut therefore always falls between 70% and 90% of the window. Above 70%
 without the arithmetic closing, the session receives only an informational
 notice.
 
@@ -174,9 +177,9 @@ ceilings:
 
 | Ceiling | Variable | Default |
 |---|---|---|
-| Context of the orchestrator | `SQUAD_CTX_CEILING` | 600,000 |
-| Sub-sessions spawned by this session | `SQUAD_MAX_SUBS` | 40 |
-| Sessions orchestrating at the same time | `SQUAD_MAX_ORCH` | 3 |
+| Context of the orchestrator | `SQUAD_CTX_CEILING` | 800,000 |
+| Sub-sessions spawned by this session | `SQUAD_MAX_SUBS` | 60 |
+| Sessions orchestrating at the same time | `SQUAD_MAX_ORCH` | 6 |
 | Reviewer dispatches for the same card | `SQUAD_MAX_REVIEWS` | 6 (the 7th is denied) |
 
 A session counts as orchestrating while it has a sub-session with activity in
@@ -189,7 +192,7 @@ A `DISPATCH DENIED` always says where the work continues. There are four exits:
 | Situation | Exit | What the session does |
 |---|---|---|
 | Context ceiling, or sub-session ceiling | **Handoff with the plan** | Writes a handoff whose `## Next step` holds the plan of the denied dispatch (card, branch, worktree, files, steps, acceptance criteria, suite command) and stops. The session switch is armed; the pickup executes the plan. |
-| No orchestrator slot, implementation, context < `SQUAD_ORCH_HERE` (120k) | **Do it right here** | Implements the card in the main session, without an agent and without a handoff. This is the one authorised exception to the dispatch rule. The review still belongs to the `verifier`. |
+| No orchestrator slot, implementation, context < `SQUAD_ORCH_HERE` (500k) | **Do it right here** | Implements the card in the main session, without an agent and without a handoff. This is the one authorised exception to the dispatch rule. The review still belongs to the `verifier`. |
 | No orchestrator slot, implementation, context ≥ `SQUAD_ORCH_HERE` | **Handoff with the plan** | As above; the fresh session, with a clean context, implements directly. |
 | No orchestrator slot, reviewer | **Wait for the slot** | Carries on with whatever does not depend on the verdict. The watcher sends `SLOT FREE` when a slot opens. The session never approves its own code. |
 | Seventh reviewer on the same card | **Owner's decision** | Comments on the card with what keeps failing and takes it to the owner. |
@@ -225,7 +228,7 @@ example) the watcher says so with `ALERT CANCELLED`.
 ## The session switch
 
 When a main session stops at handoff level, with a handoff written **by that
-session after the alert**, and nothing running in the background, the watcher
+session after the alert and after the owner's last request**, the watcher
 launches `hooks/squad-switch.py` as a detached process:
 
 1. it waits for the agent in the pane to go idle;
@@ -239,9 +242,47 @@ launches `hooks/squad-switch.py` as a detached process:
 The fresh session's pickup verifies the handoff against the repository and
 continues from `## Next step`. The work carries on without the owner present.
 
+One switch per session: the first process to create
+`~/.claude/squad/switches/<session>.claim` sends the `/clear`, any other gives
+up. A `/clear` that does not change the session (a dialog left open) gets an
+Escape, unless the session is working. If the switch gives up before the
+`/clear` (the session woke up, or the handoff changed on disk), it rearms the
+watcher, which decides again on the session's next `Stop`.
+
 Each step is logged in `~/.claude/squad/switches.log`. Any doubt means giving
 up: the handoff is already on disk and the owner can switch by hand with
 `/clear` followed by `/clear-pickup pickup`.
+
+### Waking up after the handoff
+
+A handoff can go stale between the `Stop` and the switch:
+
+- **The owner wrote after it.** A handoff written before the owner's last
+  request does not count: the session is told to write a new one.
+- **A background task came back after it.** If a `<task-notification>`
+  arrived after the last `Write` of the handoff, the session is told, once per
+  handoff, to rewrite it with that result under DONE, and to stop. Rewritten
+  or not, the switch goes ahead on the next `Stop`.
+
+### Background tasks
+
+The `Stop` event lists the session's background tasks. A task still running
+(shell, monitor, sub-agent) will wake the session when it ends, so the switch
+is not launched yet, but it is not dropped either: it is **scheduled**.
+`squad-switch.py wait` keeps watch for `SQUAD_SWITCH_WAIT` seconds (600) when
+only shells are running, or `SQUAD_SWITCH_WAIT_AGENT` (2400) when a sub-agent
+is. Then:
+
+- the task comes back, the session stops again and the normal switch goes out;
+- or the deadline passes with the pane idle, and the switch goes out anyway.
+  The copy handed to the pickup ends with a **watcher's note** listing the
+  tasks that were still running (type, id, description): their result is not
+  in the handoff, and the fresh session checks git or reruns them.
+
+The wait leaves early if another switch already claimed the session or the
+pane changed session. A session still busy, or a herdr that never answers
+again, ends the wait `SQUAD_SWITCH_BUSY` seconds (1800) past the deadline.
+One schedule is live per session at a time.
 
 The switch needs a pane it can type into, which today means the session runs
 inside **herdr** (`HERDR_PANE_ID` is set). Outside herdr the watcher still

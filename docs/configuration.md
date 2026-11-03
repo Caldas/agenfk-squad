@@ -44,9 +44,9 @@ See [watcher.md](watcher.md#the-handoff-arithmetic) for the arithmetic.
 | Variable | Default | Meaning |
 |---|---|---|
 | `SQUAD_WINDOW` | 1,000,000 | Context window of the main session, in tokens. When unset, the watcher uses 1M, or a larger value if a status line recorded one in `~/.claude/cache/session-tokens/<session>.json` |
-| `SQUAD_CTX_PCT` | 80 | Percent of the window at which the handoff is ordered regardless of anything else. Clamped to 10–100 |
+| `SQUAD_CTX_PCT` | 90 | Percent of the window at which the handoff is ordered regardless of anything else. Clamped to 10–100 |
 | `SQUAD_REREAD` | 60 | Reread share, in percent, at which the reread rule can fire. Clamped to 10–95 |
-| `SQUAD_REREAD_FLOOR` | 50 | Percent of the window that is the lowest the floor can go |
+| `SQUAD_REREAD_FLOOR` | 70 | Percent of the window that is the lowest the floor can go |
 | `SQUAD_BURN_FULL` | 50 | Percent of the session budget at which the floor reaches its lowest point |
 | `CLAUDE_SESSION_BUDGET` | 20,000,000 | Weighted tokens one session is expected to spend. `burn_pct` is measured against it |
 | `SQUAD_CTX_BASE` | 40,000 | Context of a fresh session that has just read a handoff. Used for the payback and for the minimum floor (2 × this) |
@@ -69,10 +69,10 @@ denial after 3 identical calls in a row.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `SQUAD_CTX_CEILING` | 600,000 | Orchestrator context above which a new dispatch is denied and a handoff ordered |
-| `SQUAD_MAX_SUBS` | 40 | Sub-sessions one main session may spawn |
-| `SQUAD_MAX_ORCH` | 3 | Sessions that may orchestrate sub-agents at the same time, across the machine |
-| `SQUAD_ORCH_HERE` | 120,000 | With no orchestrator slot: below this context the card is implemented in the session itself; at or above it, handoff with the plan |
+| `SQUAD_CTX_CEILING` | 800,000 | Orchestrator context above which a new dispatch is denied and a handoff ordered |
+| `SQUAD_MAX_SUBS` | 60 | Sub-sessions one main session may spawn |
+| `SQUAD_MAX_ORCH` | 6 | Sessions that may orchestrate sub-agents at the same time, across the machine |
+| `SQUAD_ORCH_HERE` | 500,000 | With no orchestrator slot: below this context the card is implemented in the session itself; at or above it, handoff with the plan |
 | `SQUAD_MAX_REVIEWS` | 6 | Reviewer dispatches allowed for the same card. The next one is denied |
 
 ## The merge queue
@@ -100,6 +100,9 @@ Per repository, with `git config`:
 | `HERDR_PANE_ID` | set by herdr | The pane the session runs in. Without it there is no automatic switch |
 | `HERDR_BIN_PATH` | `herdr` | The herdr binary |
 | `SQUAD_SWITCH_PROMPT` | `/clear-pickup pickup` | The command sent to the fresh session. Exists for testing |
+| `SQUAD_SWITCH_WAIT` | 600 | Seconds the switch waits for a background shell or monitor before going out anyway |
+| `SQUAD_SWITCH_WAIT_AGENT` | 2,400 | Seconds the switch waits for a background sub-agent before going out anyway |
+| `SQUAD_SWITCH_BUSY` | 1,800 | Seconds past that deadline the wait keeps going while the session is busy or herdr does not answer; then it gives up |
 
 ## The session report
 

@@ -1,0 +1,302 @@
+<title>Template: cloud diagram</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow+Semi+Condensed:wght@400;500;600&family=Source+Sans+3:wght@400;600;700&display=swap">
+<style>
+/* cloud-diagram template. Copy the --ds-* block, the sheet tokens, the "diagram sheet" block,
+   the <defs> library and the steps script; replace the sample drawing with the project's own.
+   PAGE CHROME = THE PROJECT'S DESIGN SYSTEM: replace the --ds-* block below with the output of
+     python3 -I ~/.claude/skills/design-reference/scripts/sweep.py <root> --css
+   The built-in default is the squad's neutral sheet (cool paper, condensed lettering). The
+   provider's category colours live only inside the diagram and do not change with the project. */
+
+/* ---------- design system (paste the output of sweep --css here) ---------- */
+:root {
+  --ds-bg: #eef1f3;
+  --ds-surface: #fbfcfd;
+  --ds-fg: #101b25;
+  --ds-fg-2: #3f4c58;
+  --ds-accent: #1b45d6;
+  --ds-border: #d3dae0;
+  --ds-font-display: "Barlow Condensed", "Arial Narrow", "Roboto Condensed", "Helvetica Neue", Arial, sans-serif;
+  --ds-font-body: "Source Sans 3", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --ds-font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ds-bg: #0e151c;
+    --ds-surface: #151e27;
+    --ds-fg: #e9eef2;
+    --ds-fg-2: #b3bec8;
+    --ds-accent: #9db0ff;
+    --ds-border: #26323d;
+  }
+}
+:root[data-theme="dark"] {
+  --ds-bg: #0e151c;
+  --ds-surface: #151e27;
+  --ds-fg: #e9eef2;
+  --ds-fg-2: #b3bec8;
+  --ds-accent: #9db0ff;
+  --ds-border: #26323d;
+}
+/* ---------- end of the design system block ---------- */
+
+/* Chrome: reads only --ds-*. --label stays condensed; if the project has a condensed face, it goes here. */
+:root{
+  --page:var(--ds-bg); --surface:var(--ds-surface); --ink:var(--ds-fg); --ink2:var(--ds-fg-2);
+  --muted:var(--ds-fg-2); --rule:var(--ds-border); --rule2:color-mix(in oklab, var(--ds-border) 70%, var(--ds-fg));
+  --accent:var(--ds-accent); --on-ink:var(--ds-surface);
+  --line:color-mix(in oklab, var(--ds-fg) 86%, var(--ds-bg)); --ext:color-mix(in oklab, var(--ds-fg-2) 78%, var(--ds-bg));
+  --display:var(--ds-font-display);
+  --label:"Barlow Semi Condensed","Arial Narrow","Roboto Condensed","Helvetica Neue",Arial,sans-serif;
+  --body:var(--ds-font-body);
+}
+/* Provider category colours (AWS): inside the diagram only. */
+:root{
+  --aws-cloud:#232f3e; --aws-region:#00868a; --aws-az:#147eba; --aws-vpc:#8c4fff;
+  --aws-subnet:#7aa116; --aws-subnet-fill:#f0f5e2; --aws-private:#00868a; --aws-private-fill:#e3f2f2;
+  --aws-compute:#ed7100; --aws-db:#c925d1; --aws-int:#e7157b; --aws-storage:#7aa116;
+  --aws-net:#8c4fff; --aws-sec:#dd344c; --aws-glyph:#ffffff; --svc-fill:#fffaf2;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --aws-cloud:#c9d2da; --aws-region:#2fc4c6; --aws-az:#55aee6; --aws-vpc:#a98bff;
+    --aws-subnet:#93c01f; --aws-subnet-fill:#17231a; --aws-private:#2fc4c6; --aws-private-fill:#122226;
+    --svc-fill:#1f2429;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --aws-cloud:#c9d2da; --aws-region:#2fc4c6; --aws-az:#55aee6; --aws-vpc:#a98bff;
+  --aws-subnet:#93c01f; --aws-subnet-fill:#17231a; --aws-private:#2fc4c6; --aws-private-fill:#122226;
+  --svc-fill:#1f2429;
+  color-scheme:dark;
+}
+body{background:var(--page);color:var(--ink);font-family:var(--body);font-size:16px;line-height:1.55;-webkit-text-size-adjust:100%}
+.wrap{max-width:1180px;margin:0 auto;padding-inline:clamp(16px,4vw,40px);padding-block:28px 64px;box-sizing:border-box}
+.wrap *{box-sizing:border-box}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+h1{font-family:var(--display);font-weight:600;font-size:clamp(40px,7vw,72px);line-height:.92;margin:0 0 20px}
+h3{font-family:var(--display);font-weight:600;font-size:24px;line-height:1.05;margin:22px 0 0}
+
+/* ---------- diagram sheet (copy this whole block) ---------- */
+.sheet{background:var(--surface);border:1.5px solid var(--ink);min-width:0}
+.scroll{overflow-x:auto;min-width:0;scrollbar-color:var(--rule2) transparent;scrollbar-width:thin}
+.dia{min-width:1040px;padding:14px 12px 6px}
+.dia svg{display:block;width:100%;height:auto}
+.hint{display:none;font-family:var(--label);font-size:13.5px;color:var(--muted);padding:8px 12px;border-bottom:1px solid var(--rule)}
+@media (max-width:1120px){.hint{display:block}}
+.dia text{font-family:var(--label);fill:var(--ink2);font-size:13px}
+.dia .t{font-weight:600;font-size:14.5px;fill:var(--ink)}
+.dia .gl{font-weight:500;font-size:13px;fill:var(--ink)}
+.dia .q{font-size:12px;fill:var(--muted)}
+.dia .grp{fill:none;stroke-width:1.5}
+.dia .g-cloud{stroke:var(--aws-cloud)}
+.dia .g-region{stroke:var(--aws-region);stroke-dasharray:2 4;stroke-linecap:round}
+.dia .g-vpc{stroke:var(--aws-vpc)}
+.dia .g-az{stroke:var(--aws-az);stroke-dasharray:8 5;stroke-width:1.25}
+.dia .g-sub{fill:var(--aws-subnet-fill);stroke:var(--aws-subnet);stroke-width:1.25}
+.dia .g-priv{fill:var(--aws-private-fill);stroke:var(--aws-private);stroke-width:1.25}
+.dia .g-svc{fill:var(--svc-fill);stroke:var(--aws-compute);stroke-dasharray:6 4;stroke-width:1.5}
+.dia .g-aux{fill:var(--svc-fill);stroke:var(--ext);stroke-dasharray:3 3;stroke-width:1.25}
+.c-cloud{fill:var(--aws-cloud)} .c-region{fill:var(--aws-region)} .c-vpc{fill:var(--aws-vpc)} .c-sub{fill:var(--aws-subnet)} .c-priv{fill:var(--aws-private)}
+.k-compute{fill:var(--aws-compute)} .k-db{fill:var(--aws-db)} .k-int{fill:var(--aws-int)} .k-storage{fill:var(--aws-storage)}
+.k-net{fill:var(--aws-net)} .k-sec{fill:var(--aws-sec)}
+.k-ext{fill:var(--surface);stroke:var(--ext);stroke-width:1.5}
+.gy{fill:none;stroke:var(--aws-glyph);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.gy.f{fill:var(--aws-glyph);stroke:none}
+.gx{fill:none;stroke:var(--ink);stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
+.gc{fill:none;stroke:var(--surface);stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.dia .ar{fill:none;stroke:var(--line);stroke-width:1.5;stroke-linejoin:round}
+.dia .ar.async{stroke-dasharray:6 5}
+.ahp{fill:var(--line)}
+.dia .jn{fill:var(--line)}
+.dia .st circle{fill:var(--ink);stroke:var(--surface);stroke-width:2;transition:fill .15s ease}
+.dia .st text{font-family:var(--label);font-weight:600;font-size:13.5px;fill:var(--on-ink)}
+.dia .st.on circle{fill:var(--accent)}
+@media (prefers-reduced-motion:no-preference){
+  .dia .ar.async{animation:flow 1.6s linear infinite}
+  @keyframes flow{to{stroke-dashoffset:-22}}
+}
+.stamp{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));border-top:1.5px solid var(--ink);margin:0}
+.stamp div{min-width:0;padding:9px 14px 11px;border-left:1px solid var(--rule2)}
+.stamp div:first-child{border-left:0}
+.stamp dt{font-family:var(--label);font-size:12.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.stamp dd{margin:1px 0 0;font-family:var(--label);font-weight:500;font-size:15.5px;line-height:1.3;color:var(--ink)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 20px;padding:10px 14px;border-top:1px solid var(--rule2);font-family:var(--label);font-size:13.5px;color:var(--ink2)}
+.legend span{display:inline-flex;align-items:center;gap:7px}
+.legend i{width:13px;height:13px;flex:none}
+.legend svg{flex:none}
+@media (max-width:760px){
+  .stamp{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .stamp div:nth-child(odd){border-left:0}
+  .stamp div:nth-child(n+3){border-top:1px solid var(--rule2)}
+}
+.steps{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 32px;counter-reset:s}
+.steps li{counter-increment:s;min-width:0;display:grid;grid-template-columns:26px minmax(0,1fr);gap:12px;align-items:start;padding:14px 0 16px;border-top:1px solid var(--rule2);font-size:15.5px;line-height:1.45}
+.steps li::before{content:counter(s);width:26px;height:26px;border-radius:50%;background:var(--ink);color:var(--on-ink);font-family:var(--label);font-weight:600;font-size:14.5px;line-height:26px;text-align:center;transition:background-color .15s ease}
+.steps li.on::before{background:var(--accent)}
+@media (max-width:900px){.steps{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:560px){.steps{grid-template-columns:minmax(0,1fr)}}
+/* ---------- end of the sheet ---------- */
+</style>
+
+<div class="wrap">
+<h1>Sheet template</h1>
+
+<div class="sheet">
+  <div class="hint">The drawing is wide: swipe sideways to see all of it.</div>
+  <div class="scroll" tabindex="0" role="region" aria-label="AWS architecture diagram, scrolls horizontally"><div class="dia">
+<svg id="dia" data-diagram viewBox="0 0 1200 700" role="img" aria-label="AWS architecture diagram. The user reaches the Application Load Balancer in the public subnets of two zones through CloudFront, which also serves the static files from S3. The load balancer spreads requests over the ECS Fargate service in the private subnets, which writes to the primary RDS PostgreSQL with a standby replica in the other zone, reads credentials from Secrets Manager and publishes jobs to SQS. A Lambda function consumes the queue and writes the job state to DynamoDB.">
+<defs>
+  <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto"><path d="M0 .8 10 5 0 9.2z" class="ahp"/></marker>
+  <!-- AWS services: square in the category colour + white glyph with a 2 stroke (viewBox 48) -->
+  <symbol id="i-task" viewBox="0 0 48 48"><rect width="48" height="48" class="k-compute"/><path class="gy" d="M24 9.5 36.5 16.7v14.6L24 38.5l-12.5-7.2V16.7z M11.5 16.7 24 24l12.5-7.3 M24 24v14.5"/><path class="gy" d="M17.7 13.1 30.3 20.4" opacity=".55"/></symbol>
+  <symbol id="i-lambda" viewBox="0 0 48 48"><rect width="48" height="48" class="k-compute"/><path class="gy" d="M15 10.5h6.5l12.5 27h4.500 M23.500 20.500 13.500 37.500"/></symbol>
+  <symbol id="i-aurora" viewBox="0 0 48 48"><rect width="48" height="48" class="k-db"/><ellipse class="gy" cx="20" cy="19" rx="9.5" ry="3.6"/><path class="gy" d="M10.5 19v15.4c0 2 4.3 3.6 9.5 3.6s9.5-1.6 9.5-3.6V24.5 M10.5 26.7c0 2 4.3 3.6 9.5 3.6s9.5-1.6 9.5-3.6"/><path class="gy f" d="M36.5 6.5l1.7 4.6 4.6 1.7-4.6 1.7-1.7 4.6-1.7-4.6-4.6-1.7 4.6-1.7z"/></symbol>
+  <symbol id="i-rds" viewBox="0 0 48 48"><rect width="48" height="48" class="k-db"/><ellipse class="gy" cx="24" cy="15" rx="11" ry="4"/><path class="gy" d="M13 15v18c0 2.200 4.900 4 11 4s11-1.800 11-4V15 M13 24c0 2.200 4.900 4 11 4s11-1.800 11-4"/></symbol>
+  <symbol id="i-dynamo" viewBox="0 0 48 48"><rect width="48" height="48" class="k-db"/><ellipse class="gy" cx="21" cy="15" rx="10" ry="3.800"/><path class="gy" d="M11 15v17.500c0 2.100 4.500 3.800 10 3.800 M31 15v8 M11 23.700c0 2.100 4.500 3.800 10 3.800"/><path class="gy f" d="M33.500 24.500h4.500l-3 5.500h4l-8 9.500 2-7h-3.500z"/></symbol>
+  <symbol id="i-sqs" viewBox="0 0 48 48"><rect width="48" height="48" class="k-int"/><path class="gy" d="M14 13.5H9.5v21H14 M34 13.5h4.5v21H34"/><path class="gy" d="M16.5 19.5h4v9h-4z M22 19.5h4v9h-4z M27.5 19.5h4v9h-4z"/></symbol>
+  <symbol id="i-s3" viewBox="0 0 48 48"><rect width="48" height="48" class="k-storage"/><ellipse class="gy" cx="24" cy="14.5" rx="12.5" ry="4"/><path class="gy" d="M11.5 14.5l3.2 20.3c.3 1.8 4.2 3.2 9.3 3.2s9-1.4 9.3-3.2l3.2-20.3 M13 24.3c2 1.5 6 2.5 11 2.5s9-1 11-2.5"/></symbol>
+  <symbol id="i-cdn" viewBox="0 0 48 48"><rect width="48" height="48" class="k-net"/><circle class="gy" cx="24" cy="24" r="13"/><path class="gy" d="M11 24h26 M24 11c-4.500 4-6.500 8.500-6.500 13s2 9 6.500 13 M24 11c4.500 4 6.500 8.500 6.500 13s-2 9-6.500 13"/></symbol>
+  <symbol id="i-alb" viewBox="0 0 48 48"><rect width="48" height="48" class="k-net"/><circle class="gy" cx="24" cy="24" r="13"/><path class="gy" d="M16.500 24h7 M23.500 24l7-6 M23.500 24l7 6 M23.500 24h7.500"/><circle class="gy f" cx="31.500" cy="17.500" r="1.800"/><circle class="gy f" cx="31.500" cy="30.500" r="1.800"/><circle class="gy f" cx="32" cy="24" r="1.800"/></symbol>
+  <symbol id="i-secrets" viewBox="0 0 48 48"><rect width="48" height="48" class="k-sec"/><rect class="gy" x="14" y="22" width="20" height="15" rx="1.500"/><path class="gy" d="M18 22v-4.500a6 6 0 0 1 12 0V22 M24 28v3.500"/></symbol>
+  <symbol id="i-bug" viewBox="0 0 48 48"><rect width="48" height="48" class="k-compute"/><path class="gy" d="M24 11.5 37.5 35.5h-27z M24 20.5v7.5 M24 31.5v.3"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 48 48"><rect width="48" height="48" class="k-compute"/><path class="gy" d="M11.5 11.5v25h25.5 M16 30.5l6.5-8 5.5 4.5 8-11.5"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 48 48"><rect width="48" height="48" class="k-compute"/><path class="gy" d="M24 38.5s-10.5-10.8-10.5-17.8a10.5 10.5 0 0 1 21 0c0 7-10.5 17.8-10.5 17.8z"/><circle class="gy" cx="24" cy="20.5" r="3.8"/></symbol>
+  <!-- outside the cloud: neutral outlined square + glyph in ink -->
+  <symbol id="x-phone" viewBox="0 0 48 48"><rect x=".75" y=".75" width="46.5" height="46.5" class="k-ext"/><rect class="gx" x="16" y="9" width="16" height="30" rx="3"/><path class="gx" d="M22 34h4"/></symbol>
+  <symbol id="x-link" viewBox="0 0 48 48"><rect x=".75" y=".75" width="46.5" height="46.5" class="k-ext"/><rect class="gx" x="9" y="11.5" width="30" height="25" rx="2"/><path class="gx" d="M9 18h30 M21 28h6 M20.5 24.5h-1.5a3.5 3.5 0 0 0 0 7h1.5 M27.5 24.5h1.5a3.5 3.5 0 0 1 0 7h-1.5"/></symbol>
+  <symbol id="x-cloud" viewBox="0 0 48 48"><rect x=".75" y=".75" width="46.5" height="46.5" class="k-ext"/><path class="gx" d="M15 33a6.5 6.5 0 0 1 .6-12.97A9 9 0 0 1 32.8 21.1 6 6 0 0 1 33 33z"/></symbol>
+  <symbol id="x-chat" viewBox="0 0 48 48"><rect x=".75" y=".75" width="46.5" height="46.5" class="k-ext"/><path class="gx" d="M10.5 13h27v18h-15.5l-6 5.5V31h-5.5z M18.5 22.5l3.5 3.5 7-7.5"/></symbol>
+  <symbol id="x-cal" viewBox="0 0 48 48"><rect x=".75" y=".75" width="46.5" height="46.5" class="k-ext"/><rect class="gx" x="10" y="13" width="28" height="24" rx="2"/><path class="gx" d="M10 20h28 M17 9.5v6 M31 9.5v6 M16 26h3 M22.5 26h3 M29 26h3 M16 31.5h3 M22.5 31.5h3"/></symbol>
+  <symbol id="x-bell" viewBox="0 0 48 48"><rect x=".75" y=".75" width="46.5" height="46.5" class="k-ext"/><path class="gx" d="M16 31v-8a8 8 0 0 1 16 0v8l2.5 3h-21z M21.5 37.5a2.5 2.5 0 0 0 5 0"/></symbol>
+  <symbol id="x-mail" viewBox="0 0 48 48"><rect x=".75" y=".75" width="46.5" height="46.5" class="k-ext"/><rect class="gx" x="9.5" y="13.5" width="29" height="21" rx="1.5"/><path class="gx" d="M10 14.5l14 11 14-11"/></symbol>
+  <!-- group icons (24, at the top-left corner of the rectangle) -->
+  <symbol id="c-cloud" viewBox="0 0 24 24"><rect width="24" height="24" class="c-cloud"/><path class="gc" d="M7.5 16.5a3.2 3.2 0 0 1 .3-6.4 4.5 4.5 0 0 1 8.6.5 3 3 0 0 1 .1 5.9z"/></symbol>
+  <symbol id="c-region" viewBox="0 0 24 24"><rect width="24" height="24" class="c-region"/><path class="gc" d="M8 19V5.5 M8 6.5h9l-2.2 3.2 2.2 3.3H8"/></symbol>
+  <symbol id="c-vpc" viewBox="0 0 24 24"><rect width="24" height="24" class="c-vpc"/><path class="gc" d="M7 14.5a3 3 0 0 1 .3-6 4.3 4.3 0 0 1 8.2.5 2.8 2.8 0 0 1 1 5.3 M10 14h4.5v4.5H10z M11 14v-1.2a1.25 1.25 0 0 1 2.5 0V14"/></symbol>
+  <symbol id="c-sub" viewBox="0 0 24 24"><rect width="24" height="24" class="c-sub"/><path class="gc" d="M7.5 11.5h9v7h-9z M9.5 11.5V8.5a2.5 2.5 0 0 1 5-.5"/></symbol>
+  <symbol id="c-priv" viewBox="0 0 24 24"><rect width="24" height="24" class="c-priv"/><path class="gc" d="M7.5 11.5h9v7h-9z M9.5 11.5V9a2.5 2.5 0 0 1 5 0v2.5"/></symbol>
+</defs>
+
+<!-- groups, outside in: 16 px inset per level, icon and label in the corner -->
+<rect class="grp g-cloud" x="130" y="40" width="1030" height="640"/>
+<use href="#c-cloud" x="130" y="40" width="22" height="22"/><text class="gl" x="160" y="56">AWS Cloud</text>
+<rect class="grp g-region" x="290" y="76" width="854" height="588"/>
+<use href="#c-region" x="290" y="76" width="22" height="22"/><text class="gl" x="320" y="92">Region us-east-1</text>
+<rect class="grp g-vpc" x="306" y="112" width="594" height="448"/>
+<use href="#c-vpc" x="306" y="112" width="22" height="22"/><text class="gl" x="336" y="128">VPC</text>
+<rect class="grp g-az" x="322" y="140" width="268" height="404"/>
+<text class="gl" x="456" y="158" text-anchor="middle">Availability Zone A</text>
+<rect class="grp g-az" x="606" y="140" width="268" height="404"/>
+<text class="gl" x="740" y="158" text-anchor="middle">Availability Zone B</text>
+<rect class="g-sub" x="332" y="168" width="248" height="94"/>
+<use href="#c-sub" x="332" y="168" width="20" height="20"/><text class="gl" x="360" y="183">Public subnet</text>
+<rect class="g-sub" x="616" y="168" width="248" height="94"/>
+<use href="#c-sub" x="616" y="168" width="20" height="20"/><text class="gl" x="644" y="183">Public subnet</text>
+<rect class="g-priv" x="332" y="272" width="248" height="262"/>
+<use href="#c-priv" x="332" y="272" width="20" height="20"/><text class="gl" x="360" y="287">Private subnet</text>
+<rect class="g-priv" x="616" y="272" width="248" height="262"/>
+<use href="#c-priv" x="616" y="272" width="20" height="20"/><text class="gl" x="644" y="287">Private subnet</text>
+
+<!-- service spanning the zones: dashed band with one instance per zone -->
+<rect class="g-svc" x="346" y="300" width="514" height="84"/>
+
+<!-- arrows: horizontal and vertical only, never crossing; a fork gets a junction dot -->
+<path class="ar" d="M88 220H167" marker-end="url(#ah)"/>
+<path class="ar" d="M216 220H573" marker-end="url(#ah)"/>
+<path class="ar" d="M262 220V614H329" marker-end="url(#ah)"/>
+<circle class="jn" cx="262" cy="220" r="3.5"/>
+<path class="ar" d="M598 244V299" marker-end="url(#ah)"/>
+<path class="ar" d="M380 384V419" marker-end="url(#ah)"/>
+<path class="ar async" d="M380 468V496H664V469" marker-end="url(#ah)"/>
+<path class="ar" d="M846 300V220H939" marker-end="url(#ah)"/>
+<path class="ar" d="M860 342H939" marker-end="url(#ah)"/>
+<path class="ar" d="M964 366V429" marker-end="url(#ah)"/>
+<path class="ar" d="M964 478V539" marker-end="url(#ah)"/>
+
+<!-- outside the cloud -->
+<use href="#x-phone" x="40" y="196" width="48" height="48"/>
+<text class="t" x="64" y="263" text-anchor="middle">User</text><text x="64" y="279" text-anchor="middle">app and browser</text>
+
+<!-- global edge, inside the cloud and outside the region -->
+<use href="#i-cdn" x="168" y="196" width="48" height="48"/>
+<text class="t" x="192" y="263" text-anchor="middle">CloudFront</text><text x="192" y="279" text-anchor="middle">CDN and WAF</text>
+
+<!-- VPC -->
+<use href="#i-alb" x="574" y="196" width="48" height="48"/>
+<text class="t" x="632" y="214">Load Balancer</text><text x="632" y="231">in both public subnets</text>
+
+<use href="#i-task" x="432" y="308" width="44" height="44"/><text class="q" x="454" y="370" text-anchor="middle">task</text>
+<use href="#i-task" x="716" y="308" width="44" height="44"/><text class="q" x="738" y="370" text-anchor="middle">task</text>
+<text class="t" x="598" y="327" text-anchor="middle">API on ECS Fargate</text>
+<text x="598" y="344" text-anchor="middle">2 to 10 tasks</text>
+<text x="598" y="360" text-anchor="middle">autoscaling on CPU</text>
+
+<use href="#i-rds" x="356" y="420" width="48" height="48"/>
+<text class="t" x="414" y="438">RDS PostgreSQL</text><text x="414" y="455">primary</text>
+<use href="#i-rds" x="640" y="420" width="48" height="48"/>
+<text class="t" x="698" y="438">RDS standby</text><text x="698" y="455">Multi-AZ</text>
+<text x="522" y="516" text-anchor="middle">synchronous replica</text>
+
+<!-- regional services, outside the VPC: label to the right of the icon -->
+<use href="#i-secrets" x="940" y="196" width="48" height="48"/>
+<text class="t" x="998" y="214">Secrets Manager</text><text x="998" y="231">database credentials</text>
+<use href="#i-sqs" x="940" y="318" width="48" height="48"/>
+<text class="t" x="998" y="336">Amazon SQS</text><text x="998" y="353">job queue</text>
+<use href="#i-lambda" x="940" y="430" width="48" height="48"/>
+<text class="t" x="998" y="448">AWS Lambda</text><text x="998" y="465">consumes the queue</text>
+<use href="#i-dynamo" x="940" y="540" width="48" height="48"/>
+<text class="t" x="998" y="558">DynamoDB</text><text x="998" y="575">job state</text>
+<use href="#i-s3" x="330" y="590" width="48" height="48"/>
+<text class="t" x="388" y="608">Amazon S3</text><text x="388" y="625">static files</text>
+
+<!-- steps: balloon on the arrow, data-s matches the list item -->
+<g class="st" data-s="1"><circle cx="128" cy="220" r="11"/><text x="128" y="224.7" text-anchor="middle">1</text></g>
+<g class="st" data-s="2"><circle cx="598" cy="272" r="11"/><text x="598" y="276.7" text-anchor="middle">2</text></g>
+<g class="st" data-s="3"><circle cx="380" cy="402" r="11"/><text x="380" y="406.7" text-anchor="middle">3</text></g>
+<g class="st" data-s="4"><circle cx="918" cy="342" r="11"/><text x="918" y="346.7" text-anchor="middle">4</text></g>
+<g class="st" data-s="5"><circle cx="964" cy="398" r="11"/><text x="964" y="402.7" text-anchor="middle">5</text></g>
+<g class="st" data-s="6"><circle cx="964" cy="509" r="11"/><text x="964" y="513.7" text-anchor="middle">6</text></g>
+</svg>
+  </div></div>
+  <dl class="stamp">
+    <div><dt>Status</dt><dd>PROPOSED · sample drawing</dd></div>
+    <div><dt>Region</dt><dd>us-east-1, one region</dd></div>
+    <div><dt>Zones</dt><dd>2, with tasks and database spread</dd></div>
+    <div><dt>Network</dt><dd>Load balancer in public; tasks and database in private, with VPC endpoints</dd></div>
+    <div><dt>State</dt><dd>Stateless tasks; state lives in RDS and DynamoDB</dd></div>
+  </dl>
+  <div class="legend" aria-label="Diagram legend">
+    <span><i style="background:var(--aws-compute)"></i>Compute</span>
+    <span><i style="background:var(--aws-db)"></i>Database</span>
+    <span><i style="background:var(--aws-int)"></i>Application Integration</span>
+    <span><i style="background:var(--aws-storage)"></i>Storage</span>
+    <span><i style="background:var(--aws-net)"></i>Networking</span>
+    <span><i style="background:var(--aws-sec)"></i>Security</span>
+    <span><i style="background:var(--surface);border:1.5px solid var(--ext)"></i>Outside AWS</span>
+    <span><svg width="26" height="8" viewBox="0 0 26 8" aria-hidden="true"><path d="M0 4h26" fill="none" stroke="var(--line)" stroke-width="1.5"/></svg>call</span>
+    <span><svg width="26" height="8" viewBox="0 0 26 8" aria-hidden="true"><path d="M0 4h26" fill="none" stroke="var(--line)" stroke-width="1.5" stroke-dasharray="6 5"/></svg>in the background: queue, push, replica</span>
+  </div>
+</div>
+
+<h3>The path of a request</h3>
+<ol class="steps" id="steps">
+  <li><span>The user calls the API. The request goes through CloudFront, which also serves the static files from S3.</span></li>
+  <li><span>The load balancer hands the request to a task in either of the two zones.</span></li>
+  <li><span>The API writes to the primary RDS; the standby replica receives the copy in the other zone.</span></li>
+  <li><span>Whatever needs no immediate answer goes to the SQS queue.</span></li>
+  <li><span>The Lambda function consumes the queue.</span></li>
+  <li><span>The Lambda writes the job state to DynamoDB.</span></li>
+</ol>
+</div>
+
+<script>
+// a list step lights the matching balloon in the diagram, and the other way round
+(function(){
+const dia=document.getElementById("dia"),steps=[...document.querySelectorAll("#steps li")];
+const lit=(n,on)=>{const g=dia.querySelector(`.st[data-s="${n}"]`);if(g)g.classList.toggle("on",on);if(steps[n-1])steps[n-1].classList.toggle("on",on)};
+steps.forEach((li,i)=>{li.addEventListener("pointerenter",()=>lit(i+1,true));li.addEventListener("pointerleave",()=>lit(i+1,false))});
+dia.querySelectorAll(".st").forEach(g=>{const n=+g.dataset.s;g.addEventListener("pointerenter",()=>lit(n,true));g.addEventListener("pointerleave",()=>lit(n,false))});
+})();
+</script>

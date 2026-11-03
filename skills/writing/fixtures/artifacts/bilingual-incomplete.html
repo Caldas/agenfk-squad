@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="pt-BR" data-languages="pt en">
+<head>
+<meta charset="utf-8">
+<title data-t="meta-title">Fixture bilíngue incompleta</title>
+<style>
+:root{--bg:#ffffff; --text:#1d2433}
+body{margin:0; background:var(--bg); color:var(--text); font-family:system-ui,sans-serif}
+.langbar{position:sticky; top:0}
+html.render .langbar{display:none!important}
+</style>
+</head>
+<body>
+<nav class="langbar" aria-label="Idioma">
+  <button type="button" data-lang="pt" aria-pressed="true" translate="no">PT</button>
+</nav>
+<h1 data-t="title">Declara português e inglês e entrega só metade</h1>
+<p data-t="body">Falta o botão EN e a chave body no inglês.</p>
+<script type="application/json" id="i18n">{"pt":{"meta-title":"Fixture bilíngue incompleta","title":"Declara português e inglês e entrega só metade","body":"Falta o botão EN e a chave body no inglês."},"en":{"meta-title":"Incomplete bilingual fixture","title":"Declares Portuguese and English and ships half"}}</script>
+<script>
+(function(){
+  var d = JSON.parse(document.getElementById("i18n").textContent);
+  function apply(l){ [].forEach.call(document.querySelectorAll("[data-t]"), function(el){ var v = (d[l] || {})[el.getAttribute("data-t")]; if (typeof v === "string") el.textContent = v; }); }
+  [].forEach.call(document.querySelectorAll(".langbar [data-lang]"), function(b){ b.addEventListener("click", function(){ apply(b.getAttribute("data-lang")); }); });
+})();
+</script>
+</body>
+</html>
