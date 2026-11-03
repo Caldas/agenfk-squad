@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="pt-BR" data-languages="pt en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title data-t="meta-title">Restore do banco de staging leva 42 minutos</title>
+<style>
+:root{--bg:#ffffff; --text:#1d2433; --border:#d5dae2}
+@media (prefers-color-scheme: dark){:root{--bg:#14171f; --text:#e8ebf2; --border:#2e333d}}
+body{margin:0; background:var(--bg); color:var(--text); font-family:system-ui,sans-serif}
+.langbar{position:sticky; top:0; display:flex; justify-content:flex-end; gap:.25rem; border-bottom:1px solid var(--border)}
+html.render .langbar{display:none!important}
+</style>
+</head>
+<body>
+<nav class="langbar" aria-label="Idioma" data-t-aria="nav-aria">
+  <button type="button" data-lang="pt" aria-pressed="true" translate="no">PT</button>
+  <button type="button" data-lang="en" aria-pressed="false" translate="no">EN</button>
+</nav>
+<main>
+  <h1 data-t="title">Restore do banco de staging leva 42 minutos</h1>
+  <table>
+    <thead><tr><th data-t="th-step">Etapa</th><th data-t="th-min">Minutos</th></tr></thead>
+    <tbody>
+      <tr><td data-t="row-copy">Cópia do snapshot</td><td translate="no">31</td></tr>
+      <tr><td data-t="row-restore">Restore da instância</td><td translate="no">11</td></tr>
+    </tbody>
+  </table>
+</main>
+<script type="application/json" id="i18n">{
+  "pt": {
+    "meta-title": "Restore do banco de staging leva 42 minutos",
+    "nav-aria": "Idioma",
+    "title": "Restore do banco de staging leva 42 minutos",
+    "th-step": "Etapa",
+    "th-min": "Minutos",
+    "row-copy": "Cópia do snapshot",
+    "row-restore": "Restore da instância"
+  },
+  "en": {
+    "meta-title": "Restoring the staging database takes 42 minutes",
+    "nav-aria": "Language",
+    "title": "Restoring the staging database takes 42 minutes",
+    "th-step": "Step",
+    "th-min": "Minutes",
+    "row-copy": "Snapshot copy",
+    "row-restore": "Instance restore"
+  }
+}</script>
+<script>
+(function(){
+  var data = {};
+  try { data = JSON.parse(document.getElementById("i18n").textContent); } catch (e) {}
+  function apply(lang){
+    var t = data[lang] || {};
+    [].forEach.call(document.querySelectorAll("[data-t]"), function(el){ var v = t[el.getAttribute("data-t")]; if (typeof v === "string") el.textContent = v; });
+    [].forEach.call(document.querySelectorAll("[data-t-aria]"), function(el){ var v = t[el.getAttribute("data-t-aria")]; if (typeof v === "string") el.setAttribute("aria-label", v); });
+    document.documentElement.lang = lang === "pt" ? "pt-BR" : lang;
+    [].forEach.call(document.querySelectorAll(".langbar [data-lang]"), function(b){ b.setAttribute("aria-pressed", String(b.getAttribute("data-lang") === lang)); });
+  }
+  [].forEach.call(document.querySelectorAll(".langbar [data-lang]"), function(b){ b.addEventListener("click", function(){ apply(b.getAttribute("data-lang")); }); });
+})();
+</script>
+</body>
+</html>

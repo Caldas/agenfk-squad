@@ -1,0 +1,16 @@
+# Voice profile fixture: a writer who keeps em dashes and uses "strategic" on
+# purpose. Format in references/voice-profile.md.
+name: fixture-writer
+language: en
+register: technical, blunt, first person when it is the writer's own decision
+sentence_length: 8 to 30 words, a short one for emphasis about once a paragraph
+paragraph_length: varies, 1 to 6 sentences
+openings: starts with the subject, rarely with a connective
+dashes: writer
+quotes: straight
+emoji: none
+allow:
+  - strategic
+avoid:
+  - inspirational endings
+  - announcing the document
