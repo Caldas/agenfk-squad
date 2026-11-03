@@ -1012,7 +1012,19 @@ def test_turn_status_falls_back_to_master():
 
 
 if __name__ == "__main__":
+    # every test runs, so one failure does not hide the others; the exit code is 1 when any failed
+    import traceback
+    failed = []
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):
-            fn()
+            try:
+                fn()
+            except Exception:
+                traceback.print_exc()
+                failed.append(name)
+                print("FAIL", name)
+                continue
             print("ok ", name)
+    if failed:
+        print("failed:", " ".join(failed))
+        sys.exit(1)

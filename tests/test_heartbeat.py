@@ -24,6 +24,12 @@ import tempfile
 import time
 import types
 
+if os.name == "nt":
+    # its fakes of git, gh and agenfk are executable scripts on PATH, which Windows does not run by name;
+    # the board heartbeat is not yet verified on Windows (docs/installation.md, Windows limits)
+    print("skipped: the board heartbeat is not yet verified on Windows")
+    sys.exit(0)
+
 # Importing heartbeat.py by absolute path would leave a .pyc holding that path
 # in the tree, and CI's private-path grep matches it.
 sys.dont_write_bytecode = True

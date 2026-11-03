@@ -258,6 +258,12 @@ def gh_by_target(h, prs):
     with open(gh, "w") as fh:
         fh.write(f"""#!/usr/bin/env python3
 import json, sys
+
+if os.name == "nt":
+    # its fakes of git, gh and agenfk are executable scripts on PATH, which Windows does not run by name;
+    # the merge seal is not yet verified on Windows (docs/installation.md, Windows limits)
+    print("skipped: the merge seal is not yet verified on Windows")
+    sys.exit(0)
 a = sys.argv[1:]
 open({log!r}, "a").write(json.dumps(a) + "\\n")
 t = a[2] if a[:2] == ["pr", "view"] and len(a) > 2 and not a[2].startswith("-") else ""
