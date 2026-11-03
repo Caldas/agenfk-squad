@@ -1,7 +1,7 @@
 # The watcher
 
 `hooks/squad-watch.py` is one Python file, standard library only, registered on
-five Claude Code hook events. It reads the transcript of every session and
+seven Claude Code hook events. It reads the transcript of every session and
 sub-session, does a fixed piece of arithmetic, and acts. It never crashes a
 session: any error ends silently with exit code 0 and a line in
 `~/.claude/squad/watch-errors.log`.
@@ -24,9 +24,11 @@ measured. `SQUAD_WATCH=0` turns it off.
 |---|---|
 | `PostToolUse` | Records the call and warns on repetition. Every 60 seconds it reads what was appended to the transcript and redoes the arithmetic: context, burn, reread share, payback. A sub-session at its threshold is told to return its handoff; a main session is told to write one. |
 | `PreToolUse` | In a sub-session: denies an identical repeated call (loop) and, above the context cut, denies everything except `git` and `agenfk`. In a main session: applies the dispatch brake to `Agent`/`Task` calls and the merge queue to merge and sync commands. |
+| `PostToolUseFailure` | A tool call failed: if it was the merge that held the merge turn, gives the turn back at once instead of waiting for `SQUAD_TURN_HOLD` to expire. |
 | `SubagentStop` | Writes the sub-session's metrics to `metrics.jsonl` and leaves a note for the parent when the sub-session ended badly. |
 | `UserPromptSubmit` | Delivers pending notes to the main session. |
 | `Stop` | Main session at handoff level: if it stopped without writing the handoff, the stop is blocked and the order repeated; if it stops again without one, the watcher writes a minimal handoff itself. With a handoff on disk and nothing running in the background, it launches the session switch. |
+| `PreCompact` | Main session, `/compact` or auto-compact: before the conversation is summarized, writes the same minimal handoff to `~/.claude/squad/handoffs/<session>-compact.md`. It prints nothing, so it never blocks the compaction, and it never switches the session. |
 
 Reading the transcript is incremental: the watcher keeps a byte offset per
 session and parses only whole lines added since the last look, so it costs the
@@ -210,6 +212,12 @@ Nothing is interrupted mid-task.
   blocked and the order repeated. If it stops again without one, the
   watcher writes a minimal handoff on its own, from what it can verify: git
   state, the owner's last request, the denied dispatches.
+- Before a compaction (`/compact`, or auto-compact), the watcher writes the
+  same minimal handoff to `<session>-compact.md`, with the trigger (`manual`
+  or `auto`) and the instructions given to `/compact` in its header. The
+  summary that replaces the conversation keeps the decisions only in summary
+  form; the file keeps git, the request and the denied briefs as they were.
+  Sub-sessions are skipped.
 
 If the alert no longer applies (the context dropped after a compaction, for
 example) the watcher says so with `ALERT CANCELLED`.

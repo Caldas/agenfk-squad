@@ -1,18 +1,15 @@
 #!/usr/bin/env python3
-"""scripts/squad_settings.py registers hooks that actually run on the platform.
+"""scripts/squad_settings.py honours a matcher set on one hook in the manifest.
 
-Self-checking: the exit code is the verdict. Runs in a throwaway config dir and
-never touches ~/.claude. The string tests run everywhere; the ones that need a
-Windows path say so.
+A hook entry may carry "matchers": {event: matcher}, which wins over the
+top-level "matchers" for that hook and event. Each test writes its own manifest
+and config dir, so nothing here reads the real hooks/manifest.json or ~/.claude.
 
     python3 tests/test_squad_settings.py
 """
-import contextlib
-import io
 import json
 import os
-import shlex
-import subprocess
+import shutil
 import sys
 import tempfile
 
@@ -20,192 +17,238 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 import squad_settings as ss  # noqa: E402
 
-WINDOWS = os.name == "nt"
-MANIFEST = os.path.join(ROOT, "hooks", "manifest.json")
+TMP = tempfile.mkdtemp(prefix="squad-settings-")
 
 
-def which_only(**found):
-    return lambda name: found.get(name)
-
-
-def test_posix_command_is_what_it_always_was():
-    cmd = ss.command_for("/srv/u/.claude", "squad-watch.py", windows=False)
-    assert cmd == "python3 " + shlex.quote(os.path.join("/srv/u/.claude", "hooks", "squad-watch.py")), cmd
-
-
-def test_windows_command_uses_forward_slashes_and_a_real_interpreter():
-    cmd = ss.command_for(r"C:\Profiles\u\.claude", "squad-watch.py", windows=True, launcher="python")
-    assert cmd == 'python "C:/Profiles/u/.claude/hooks/squad-watch.py"', cmd
-    cmd = ss.command_for(r"C:\Profiles\Fábio T\.claude", "squad-watch.py", windows=True, launcher="py -3")
-    assert cmd == 'py -3 "C:/Profiles/Fábio T/.claude/hooks/squad-watch.py"', cmd
-
-
-def test_the_windows_interpreter_is_never_the_store_stub():
-    stub = r"C:\Profiles\u\AppData\Local\Microsoft\WindowsApps\python.exe"
-    real = r"C:\Program Files\Python314\python.exe"
-    pick = ss.interpreter
-    assert pick(windows=False) == "python3"
-    assert pick(windows=True, which=which_only(python=real)) == "python"
-    assert pick(windows=True, which=which_only(python=stub, py=r"C:\Windows\py.exe"), probe=lambda: True) == "py -3"
-    assert pick(windows=True, which=which_only(py=r"C:\Windows\py.exe"), probe=lambda: True) == "py -3"
-    # nothing on PATH: the interpreter that is running this script, by absolute path
-    got = pick(windows=True, which=which_only(python=stub), executable=r"C:\Program Files\Python314\python.exe")
-    assert got == '"C:/Program Files/Python314/python.exe"', got
-
-
-def test_the_py_launcher_is_used_only_when_it_has_a_python3():
-    pick = ss.interpreter
-    py = r"C:\Windows\py.exe"
-    exe = r"C:\Program Files\Python314\python.exe"
-    assert pick(windows=True, which=which_only(py=py), probe=lambda: True) == "py -3"
-    assert pick(windows=True, which=which_only(py=py), executable=exe, probe=lambda: False) == \
-        '"C:/Program Files/Python314/python.exe"'
-
-
-def test_a_stale_python3_entry_is_repaired_on_windows_and_left_alone_on_posix():
-    if WINDOWS:
-        with tempfile.TemporaryDirectory() as tmp:
-            config = config_with_hooks(tmp)
-            path = os.path.join(config, "settings.json")
-            stale = {"hooks": {"UserPromptSubmit": [{"matcher": "*", "hooks": [
-                {"type": "command", "command": "python3 " + shlex.quote(os.path.join(config, "hooks", "squad-router.py")),
-                 "timeout": 5}]}]}}
-            with open(path, "w", encoding="utf-8") as fh:
-                json.dump(stale, fh)
-            rc, out, _ = run_main("install", "--config", config, "--manifest", MANIFEST)
-            assert rc == 0 and "fixed   squad-router.py" in out, out
-            cmds = [c for c in squad_commands(json.loads(read(path))) if "squad-router.py" in c]
-            assert len(cmds) == 1 and not cmds[0].startswith("python3"), cmds      # repaired, not duplicated
-            rc, out, _ = run_main("install", "--config", config, "--manifest", MANIFEST)
-            assert "fixed" not in out, out                                          # and then stable
-    groups = [{"hooks": [{"type": "command", "command": "python3 /srv/u/.claude/hooks/squad-router.py"}]}]
-    assert ss.repair_stale(groups, "/srv/u/.claude", "squad-router.py", windows=False) == 0
-    assert groups[0]["hooks"][0]["command"].startswith("python3 ")
-
-
-def test_split_reads_both_spellings_of_a_windows_command():
-    words = ss.split_command(r'python "C:\Profiles\u\.claude\hooks\squad-watch.py"', windows=True)
-    assert words == ["python", r"C:\Profiles\u\.claude\hooks\squad-watch.py"], words
-    words = ss.split_command('py -3 "C:/Profiles/u/.claude/hooks/squad-watch.py"', windows=True)
-    assert words == ["py", "-3", "C:/Profiles/u/.claude/hooks/squad-watch.py"], words
-    assert ss.split_command("python3 '/srv/u/a b/x.py'", windows=False) == ["python3", "/srv/u/a b/x.py"]
-    assert ss.split_command('python "unterminated', windows=True) is None
-
-
-def test_a_windows_hook_command_is_recognised_as_the_squads():
-    if not WINDOWS:
-        return        # needs Windows path semantics (drive letters, case-insensitive)
-    with tempfile.TemporaryDirectory() as tmp:
-        config = os.path.join(tmp, ".claude")
-        os.makedirs(os.path.join(config, "hooks"))
-        script = os.path.join(config, "hooks", "squad-watch.py")
-        open(script, "w").close()
-        fwd, back = script.replace("\\", "/"), script
-        ok = lambda c: ss.squad_script(c, config, windows=True)       # noqa: E731
-        assert ok(f'python "{fwd}"') == "squad-watch.py"
-        assert ok(f'python "{back}"') == "squad-watch.py"
-        assert ok(f'py -3 "{fwd}"') == "squad-watch.py"
-        assert ok(f'python3 "{fwd}"') == "squad-watch.py"
-        assert ok(f'"{sys.executable}" "{fwd}"') == "squad-watch.py"
-        assert ok(f'python "{fwd.upper()}"') == "squad-watch.py"      # Windows paths do not care about case
-        # a user's own hook that shares the file name, and things that are not an interpreter call
-        assert ok('python "C:/opt/mine/squad-watch.py"') is None
-        assert ok(f'grep squad-watch.py "{fwd}"') is None
-        assert ok(f'python -c "{fwd}"') is None
-        assert ok(f'python "{fwd}" --extra') is None
-
-
-def run_main(*argv):
-    out, err = io.StringIO(), io.StringIO()
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-        rc = ss.main(list(argv))
-    return rc, out.getvalue(), err.getvalue()
-
-
-def config_with_hooks(tmp):
-    config = os.path.join(tmp, ".claude")
+def config_with(*scripts):
+    """A config dir whose hooks/ holds the given scripts, as install.sh leaves it."""
+    config = tempfile.mkdtemp(dir=TMP)
     os.makedirs(os.path.join(config, "hooks"))
-    for name in ("squad-router.py", "squad-watch.py"):
-        with open(os.path.join(config, "hooks", name), "w") as fh:
-            fh.write('print("ran " + __file__.replace("\\\\", "/").rsplit("/", 1)[-1])\n')
+    for s in scripts:
+        open(os.path.join(config, "hooks", s), "w").close()
     return config
 
 
-def read(path):
-    with open(path, encoding="utf-8") as fh:
-        return fh.read()
+def manifest(hooks, matchers=None):
+    path = os.path.join(tempfile.mkdtemp(dir=TMP), "manifest.json")
+    with open(path, "w") as fh:
+        json.dump({"matchers": matchers if matchers is not None else {"PreToolUse": "*"},
+                   "hooks": hooks}, fh)
+    return path
 
 
-def squad_commands(settings):
-    return [h["command"] for groups in settings.get("hooks", {}).values() for g in groups for h in g["hooks"]]
+def run(action, settings, config, manifest_path):
+    plan, scripts = ss.load_manifest(manifest_path)
+    report = []
+    if action == "install":
+        return ss.install(settings, config, plan, report), report
+    return ss.uninstall(settings, config, set(scripts), report), report
 
 
-def test_install_twice_writes_once_and_the_command_runs():
-    with tempfile.TemporaryDirectory() as tmp:
-        config = config_with_hooks(tmp)
-        path = os.path.join(config, "settings.json")
-        rc, out, _ = run_main("install", "--config", config, "--manifest", MANIFEST)
-        assert rc == 0 and "wrote" in out, out
-        first = read(path)
-        rc, out, _ = run_main("install", "--config", config, "--manifest", MANIFEST)
-        assert rc == 0 and "nothing to change" in out, out
-        assert read(path) == first
-        assert not [n for n in os.listdir(config) if ".bak-" in n], os.listdir(config)   # no file existed the first time
-        cmds = squad_commands(json.loads(first))
-        assert cmds, first
-        if WINDOWS:
-            assert not any(c.startswith("python3") for c in cmds), cmds              # the Store stub
-        # the command a hook event would run, through a shell, does what the script does
-        done = subprocess.run(next(c for c in cmds if "squad-router.py" in c), shell=True, capture_output=True,
-                              text=True, timeout=60)
-        assert done.stdout.strip() == "ran squad-router.py", (done.stdout, done.stderr)
+def groups_of(settings, event, script, config):
+    """The matcher of every group on this event that runs this squad script."""
+    return [g.get("matcher") for g in settings.get("hooks", {}).get(event, [])
+            for h in g.get("hooks", []) if ss.squad_script(h.get("command"), config) == script]
 
 
-def test_uninstall_takes_the_squads_entries_and_nothing_else():
-    with tempfile.TemporaryDirectory() as tmp:
-        config = config_with_hooks(tmp)
-        path = os.path.join(config, "settings.json")
-        theirs = {"type": "command", "command": "python /opt/mine/squad-watch.py"}
-        other = {"hooks": {"Stop": [{"hooks": [theirs]}]}, "model": "opus", "env": {"A": "1"}}
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump(other, fh)
-        run_main("install", "--config", config, "--manifest", MANIFEST)
-        rc, out, _ = run_main("uninstall", "--config", config, "--manifest", MANIFEST)
-        assert rc == 0, out
-        left = json.loads(read(path))
-        assert left == other, left
+WATCH = {"script": "squad-watch.py", "timeout": 10, "events": ["PreToolUse", "Stop"]}
+GRAPH = {"script": "squad-graph.py", "timeout": 10, "events": ["PreToolUse"],
+         "matchers": {"PreToolUse": "Bash|Grep|Read|Glob"}}
 
 
-def test_the_entries_from_the_installation_doc_are_still_recognised():
-    # docs/installation.md registers `python3 ~/.claude/hooks/<script>`: install must keep them, uninstall remove them
-    with tempfile.TemporaryDirectory() as tmp:
-        saved = {k: os.environ.get(k) for k in ("HOME", "USERPROFILE")}
-        os.environ["HOME"] = os.environ["USERPROFILE"] = tmp
+# ---------------------------------------------------------------- tests
+
+def test_a_hook_matcher_wins_over_the_top_level_one_for_its_event_only():
+    config = config_with("squad-watch.py", "squad-graph.py")
+    settings = {}
+    changed, _ = run("install", settings, config, manifest([WATCH, GRAPH]))
+    assert changed
+    assert groups_of(settings, "PreToolUse", "squad-graph.py", config) == ["Bash|Grep|Read|Glob"], settings
+    assert groups_of(settings, "PreToolUse", "squad-watch.py", config) == ["*"], settings
+    assert groups_of(settings, "Stop", "squad-watch.py", config) == [None], settings
+
+
+def test_a_hook_matcher_for_one_event_leaves_its_other_events_on_the_top_level_one():
+    mixed = {"script": "squad-graph.py", "timeout": 10, "events": ["PreToolUse", "PostToolUse"],
+             "matchers": {"PreToolUse": "Bash"}}
+    config = config_with("squad-graph.py")
+    settings = {}
+    run("install", settings, config, manifest([mixed], matchers={"PreToolUse": "*", "PostToolUse": "Edit"}))
+    assert groups_of(settings, "PreToolUse", "squad-graph.py", config) == ["Bash"], settings
+    assert groups_of(settings, "PostToolUse", "squad-graph.py", config) == ["Edit"], settings
+
+
+def test_a_hook_whose_link_is_missing_does_not_stay_on_its_old_broad_matcher():
+    config = config_with()                                  # install.sh left no link
+    old = {"type": "command", "command": ss.command_for(config, "squad-graph.py")}
+    mine = {"type": "command", "command": "echo mine"}
+    settings = {"hooks": {"PreToolUse": [{"matcher": "*", "hooks": [old, mine]}]}}
+    changed, report = run("install", settings, config, manifest([GRAPH]))
+    assert changed, report
+    assert settings == {"hooks": {"PreToolUse": [{"matcher": "*", "hooks": [mine]}]}}, settings
+    assert any(line.startswith("SKIPPED") and "old registration was removed" in line for line in report), report
+
+
+def test_two_matchers_on_one_event_land_in_two_groups():
+    config = config_with("squad-watch.py", "squad-graph.py")
+    settings = {}
+    run("install", settings, config, manifest([WATCH, GRAPH]))
+    pre = settings["hooks"]["PreToolUse"]
+    assert sorted(g.get("matcher") for g in pre) == ["*", "Bash|Grep|Read|Glob"], pre
+    assert all(len(g["hooks"]) == 1 for g in pre), pre
+
+
+def test_hooks_that_share_a_matcher_share_one_group():
+    other = dict(GRAPH, script="squad-other.py")
+    config = config_with("squad-graph.py", "squad-other.py")
+    settings = {}
+    run("install", settings, config, manifest([GRAPH, other]))
+    pre = settings["hooks"]["PreToolUse"]
+    assert len(pre) == 1 and len(pre[0]["hooks"]) == 2, pre
+
+
+def test_a_second_install_with_hook_matchers_changes_nothing():
+    config = config_with("squad-watch.py", "squad-graph.py")
+    m = manifest([WATCH, GRAPH])
+    settings = {}
+    run("install", settings, config, m)
+    before = json.dumps(settings, sort_keys=True)
+    changed, report = run("install", settings, config, m)
+    assert not changed, report
+    assert json.dumps(settings, sort_keys=True) == before
+
+
+def test_a_hook_registered_under_an_old_matcher_moves_and_the_users_hooks_stay():
+    config = config_with("squad-graph.py")
+    old = ss.command_for(config, "squad-graph.py")
+    mine = {"type": "command", "command": "echo mine"}
+    settings = {"hooks": {"PreToolUse": [
+        {"matcher": "*", "hooks": [{"type": "command", "command": old, "timeout": 10}, mine]},
+        {"matcher": "Edit", "hooks": [{"type": "command", "command": old}]},
+    ]}}
+    changed, report = run("install", settings, config, manifest([GRAPH]))
+    assert changed, report
+    assert groups_of(settings, "PreToolUse", "squad-graph.py", config) == ["Bash|Grep|Read|Glob"], settings
+    pre = settings["hooks"]["PreToolUse"]
+    assert {"matcher": "*", "hooks": [mine]} in pre, pre           # the user's hook keeps its group
+    assert not any(g.get("matcher") == "Edit" for g in pre), pre   # a group left empty is dropped
+    assert any("moved" in line for line in report), report
+
+
+def test_uninstall_removes_a_hook_registered_under_its_own_matcher():
+    config = config_with("squad-watch.py", "squad-graph.py")
+    m = manifest([WATCH, GRAPH])
+    settings = {"model": "opus"}
+    run("install", settings, config, m)
+    changed, _ = run("uninstall", settings, config, m)
+    assert changed
+    assert settings == {"model": "opus"}, settings
+
+
+def test_a_manifest_without_hook_matchers_installs_what_it_did_before():
+    config = config_with("squad-router.py", "squad-watch.py")
+    router = {"script": "squad-router.py", "timeout": 5, "events": ["UserPromptSubmit"]}
+    settings = {}
+    run("install", settings, config,
+        manifest([router, WATCH], matchers={"UserPromptSubmit": "*", "PreToolUse": "*"}))
+    expected = {"hooks": {
+        "UserPromptSubmit": [{"matcher": "*", "hooks": [
+            {"type": "command", "command": ss.command_for(config, "squad-router.py"), "timeout": 5}]}],
+        "PreToolUse": [{"matcher": "*", "hooks": [
+            {"type": "command", "command": ss.command_for(config, "squad-watch.py"), "timeout": 10}]}],
+        "Stop": [{"hooks": [
+            {"type": "command", "command": ss.command_for(config, "squad-watch.py"), "timeout": 10}]}],
+    }}
+    assert settings == expected, json.dumps(settings, indent=1)
+
+
+def test_the_real_manifest_names_only_events_its_hooks_use_in_hook_matchers():
+    with open(ss.MANIFEST) as fh:
+        real = json.load(fh)
+    for h in real["hooks"]:
+        extra = set(h.get("matchers", {})) - set(h["events"])
+        assert not extra, (h["script"], extra)
+
+
+def test_a_copy_under_another_matcher_goes_even_when_the_right_one_is_there():
+    config = config_with("squad-graph.py")
+    cmd = {"type": "command", "command": ss.command_for(config, "squad-graph.py"), "timeout": 10}
+    settings = {"hooks": {"PreToolUse": [
+        {"matcher": "*", "hooks": [dict(cmd)]},
+        {"matcher": "Bash|Grep|Read|Glob", "hooks": [dict(cmd)]},
+    ]}}
+    changed, report = run("install", settings, config, manifest([GRAPH]))
+    assert changed, report
+    assert groups_of(settings, "PreToolUse", "squad-graph.py", config) == ["Bash|Grep|Read|Glob"], settings
+    changed, report = run("install", settings, config, manifest([GRAPH]))
+    assert not changed, report
+
+
+def test_only_the_hook_that_moves_leaves_a_group_it_shares_with_another_squad_hook():
+    config = config_with("squad-watch.py", "squad-graph.py")
+    shared = {"matcher": "*", "hooks": [
+        {"type": "command", "command": ss.command_for(config, "squad-watch.py"), "timeout": 10},
+        {"type": "command", "command": ss.command_for(config, "squad-graph.py"), "timeout": 10},
+    ]}
+    settings = {"hooks": {"PreToolUse": [shared]}}
+    run("install", settings, config, manifest([WATCH, GRAPH]))
+    assert groups_of(settings, "PreToolUse", "squad-watch.py", config) == ["*"], settings
+    assert groups_of(settings, "PreToolUse", "squad-graph.py", config) == ["Bash|Grep|Read|Glob"], settings
+
+
+def test_a_null_hook_matcher_means_no_matcher_even_when_the_top_level_has_one():
+    config = config_with("squad-graph.py")
+    settings = {}
+    run("install", settings, config, manifest([dict(GRAPH, matchers={"PreToolUse": None})]))
+    assert settings["hooks"]["PreToolUse"] == [{"hooks": [
+        {"type": "command", "command": ss.command_for(config, "squad-graph.py"), "timeout": 10}]}], settings
+
+
+def test_uninstall_keeps_the_users_hook_in_a_narrow_group():
+    config = config_with("squad-graph.py")
+    m = manifest([GRAPH])
+    settings = {}
+    run("install", settings, config, m)
+    mine = {"type": "command", "command": "echo mine"}
+    settings["hooks"]["PreToolUse"][0]["hooks"].append(mine)
+    run("uninstall", settings, config, m)
+    assert settings == {"hooks": {"PreToolUse": [{"matcher": "Bash|Grep|Read|Glob", "hooks": [mine]}]}}, settings
+
+
+def test_uninstall_reaches_every_group_of_an_event():
+    config = config_with("squad-watch.py", "squad-graph.py")
+    m = manifest([WATCH, GRAPH])
+    settings = {}
+    run("install", settings, config, m)
+    mine = {"type": "command", "command": "echo mine"}
+    settings["hooks"]["PreToolUse"].append({"matcher": "Edit", "hooks": [mine]})
+    run("uninstall", settings, config, m)
+    assert settings == {"hooks": {"PreToolUse": [{"matcher": "Edit", "hooks": [mine]}]}}, settings
+
+
+def test_a_malformed_hook_matcher_is_refused_before_anything_is_written():
+    config = config_with("squad-graph.py")
+    cases = [manifest([dict(GRAPH, matchers=bad)]) for bad in
+             ("Bash", ["PreToolUse"], {"PreTooluse": "Bash"}, {"PreToolUse": 5}, {"PreToolUse": ["Bash"]})]
+    cases.append(manifest([WATCH], matchers={"PreToolUse": 5}))          # the top-level value too
+    for m in cases:
+        with open(m) as fh:
+            bad = fh.read()
         try:
-            config = config_with_hooks(tmp)
-            path = os.path.join(config, "settings.json")
-            doc = {"hooks": {"UserPromptSubmit": [{"matcher": "*", "hooks": [
-                {"type": "command", "command": "python3 ~/.claude/hooks/squad-router.py", "timeout": 5}]}]}}
-            with open(path, "w", encoding="utf-8") as fh:
-                json.dump(doc, fh)
-            rc, out, _ = run_main("install", "--config", config, "--manifest", MANIFEST)
-            if WINDOWS:      # there `python3` is the Store stub: install repairs the entry instead of keeping it
-                assert rc == 0 and "fixed   squad-router.py" in out, out
-            else:
-                assert rc == 0 and "squad-router.py  UserPromptSubmit (already registered)" in out, out
-            rc, out, _ = run_main("uninstall", "--config", config, "--manifest", MANIFEST)
-            assert rc == 0 and "off     UserPromptSubmit:" in out and "squad-router.py" in out, out
-            assert squad_commands(json.loads(read(path))) == []
-        finally:
-            for k, v in saved.items():
-                if v is None:
-                    os.environ.pop(k, None)
-                else:
-                    os.environ[k] = v
+            ss.load_manifest(m)
+        except ss.BadManifest:
+            pass
+        else:
+            raise AssertionError(f"{bad!r} was accepted")
+        assert ss.main(["install", "--config", config, "--manifest", m]) == 2
+        assert not os.path.exists(os.path.join(config, "settings.json"))
 
 
 if __name__ == "__main__":
-    for name, fn in sorted(globals().items()):
-        if name.startswith("test_") and callable(fn):
-            fn()
-            print("ok ", name)
+    try:
+        for name, fn in sorted(globals().items()):
+            if name.startswith("test_") and callable(fn):
+                fn()
+                print("ok ", name)
+    finally:
+        shutil.rmtree(TMP, ignore_errors=True)

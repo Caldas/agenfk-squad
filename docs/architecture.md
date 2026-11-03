@@ -14,7 +14,7 @@ agenfk-squad/
 │   └── vendor/               third-party skills, Apache-2.0, unmodified
 ├── hooks/
 │   ├── squad-router.py       UserPromptSubmit: suggests the agent for the request
-│   ├── squad-watch.py        the watcher: five hook events
+│   ├── squad-watch.py        the watcher: seven hook events
 │   ├── squad-switch.py       detached: clears the pane and calls the pickup
 │   └── squad-turn.py         the merge queue CLI (`squad-turn`)
 ├── flows/squad-delivery.json the AgenFK flow whose steps match the agents
@@ -88,8 +88,10 @@ stdin. The watcher is one script that looks at `hook_event_name` and branches.
 | `UserPromptSubmit` | The owner sends a prompt | `squad-watch.py` | No. Delivers pending notes (a sub-session ended badly, `SLOT FREE`, `MERGE TURN`) |
 | `PreToolUse` | Before any tool call | `squad-watch.py` | Yes. Returns `permissionDecision: deny` with the reason |
 | `PostToolUse` | After any tool call | `squad-watch.py` | No. Adds context: warnings, `PROACTIVE HANDOFF` |
+| `PostToolUseFailure` | A tool call fails | `squad-watch.py` | No. Gives back the merge turn a failed merge held |
 | `SubagentStop` | A sub-session ends | `squad-watch.py` | No. Records metrics, leaves a note for the parent |
 | `Stop` | The main session ends its turn | `squad-watch.py` | Yes. Returns `decision: block` when a handoff is owed |
+| `PreCompact` | Before `/compact` or an auto-compact | `squad-watch.py` | No. Writes `<session>-compact.md` in the main session; prints nothing |
 
 The router is separate on purpose: it is seventy lines of regular expressions
 with no state, and it should keep working if the watcher is switched off.
@@ -131,6 +133,7 @@ restart.
 | `watch/<session>.notes` | watcher | Notes waiting for the session's next prompt |
 | `handoffs/<session>-dispatches.md` | watcher | The full brief of every denied dispatch |
 | `handoffs/<session>-watch.md` | watcher | The minimal handoff the watcher writes when a session will not |
+| `handoffs/<session>-compact.md` | watcher | The minimal handoff written before a `/compact` or an auto-compact |
 | `handoffs/<session>-<hash>.md` | watcher | The read-only, hash-checked copy handed to the pickup |
 | `turn/<repo-hash>.json` | watcher | Per repository: who holds the merge turn, since when, the queue |
 | `metrics.jsonl` | watcher | One line per finished sub-session |

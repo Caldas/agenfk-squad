@@ -24,6 +24,9 @@ GET = os.path.join(ROOT, "get.sh")
 with open(os.path.join(ROOT, "hooks", "manifest.json")) as _fh:
     MANIFEST = json.load(_fh)
 WANTED = [(h["script"], e) for h in MANIFEST["hooks"] for e in h["events"]]
+# A hook's own matcher wins over the top-level one for that event.
+MATCHER = {(h["script"], e): h.get("matchers", {}).get(e, MANIFEST["matchers"].get(e))
+           for h in MANIFEST["hooks"] for e in h["events"]}
 
 TMP = tempfile.mkdtemp(prefix="get-")
 GITCONFIG = os.path.join(TMP, "gitconfig")       # no global git config of the machine's user
@@ -205,7 +208,7 @@ def assert_registered(h):
         groups = [g for g in s["hooks"].get(event, [])
                   for hk in g["hooks"] if shlex.split(hk["command"]) == exact]
         assert len(groups) == 1, (script, event, s["hooks"].get(event))
-        assert groups[0].get("matcher") == MANIFEST["matchers"].get(event), (event, groups[0])
+        assert groups[0].get("matcher") == MATCHER[(script, event)], (event, groups[0])
     return s
 
 
@@ -218,6 +221,9 @@ def test_fresh_install_takes_the_latest_release_tag_and_registers_every_hook():
     assert head(h) == REFS["v0.10.0"], "stable is the highest v* tag on main, by version"
     assert_registered(h)
     assert "PostToolUseFailure" in read_settings(h)["hooks"]
+    precompact = read_settings(h)["hooks"].get("PreCompact")
+    assert precompact and "matcher" not in precompact[0], precompact
+    assert precompact[0]["hooks"][0]["timeout"] == 20, precompact
     assert backups(h) == [], "there was nothing to back up"
     assert leftovers(h) == []
     for path in ("agents/developer.md", "hooks/squad-watch.py", "hooks/squad-router.py", "CLAUDE.md"):

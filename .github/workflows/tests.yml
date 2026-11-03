@@ -37,13 +37,18 @@ jobs:
         run: python tests/test_watch.py
       - name: Platform seams, hook registration, omp adapters and the CI config itself
         run: |
-          for t in tests/test_watch_windows.py tests/test_squad_settings.py tests/test_watch_omp.py tests/test_watch_omp_bridge.py                    tests/test_session_context_omp.py tests/test_omp_agents.py tests/test_local_validation_profile.py                    tests/test_private_paths.py tests/test_ci_config.py tests/test_docs_windows.py; do
+          for t in tests/test_watch_windows.py tests/test_squad_settings_windows.py tests/test_watch_omp.py tests/test_watch_omp_bridge.py                    tests/test_session_context_omp.py tests/test_omp_agents.py tests/test_local_validation_profile.py                    tests/test_private_paths.py tests/test_ci_config.py tests/test_docs_windows.py; do
             python -B "$t" || exit 1
           done
       # the PowerShell installers say so and exit 0 on Linux: their real run is the windows job
       - name: PowerShell installer tests (skip on Linux, run on Windows)
         run: |
           for t in tests/test_install_ps1.py tests/test_get_ps1.py; do
+            python -B "$t" || exit 1
+          done
+      - name: Board heartbeat, heavy review and merge seal tests
+        run: |
+          for t in tests/test_heartbeat.py tests/test_review.py tests/test_seal.py; do
             python -B "$t" || exit 1
           done
       # Node is the same on every Python leg: run the helper tests once.
@@ -75,7 +80,7 @@ jobs:
   # A runner administrator may create symbolic links, so the symlink branches run here too.
   windows:
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 20          # a leg takes about 2 minutes
     strategy:
       fail-fast: false
       matrix:
@@ -101,10 +106,13 @@ jobs:
         run: python -m py_compile hooks/*.py scripts/*.py skills/session-context/scripts/session_context.py
       - name: Whole test suite (a test that is not for Windows says so and exits 0)
         run: |
+          # every file runs, so one failure does not hide the others; the step fails at the end
+          failed=""
           for t in tests/test_*.py; do
             echo "::group::$t"
-            python -B "$t" || { echo "::error::$t failed"; exit 1; }
+            python -B "$t" || { echo "::error::$t failed"; failed="$failed $t"; }
             echo "::endgroup::"
           done
+          if [ -n "$failed" ]; then echo "::error::failed:$failed"; exit 1; fi
       - name: No private paths in the tree
         run: python scripts/check_private_paths.py

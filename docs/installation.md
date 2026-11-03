@@ -115,6 +115,14 @@ have. Replace `~/.claude` with the absolute path if your shell does not expand
         ]
       }
     ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "*",
+        "hooks": [
+          { "type": "command", "command": "python3 ~/.claude/hooks/squad-watch.py", "timeout": 10 }
+        ]
+      }
+    ],
     "SubagentStop": [
       {
         "hooks": [
@@ -128,6 +136,13 @@ have. Replace `~/.claude` with the absolute path if your shell does not expand
           { "type": "command", "command": "python3 ~/.claude/hooks/squad-watch.py", "timeout": 10 }
         ]
       }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          { "type": "command", "command": "python3 ~/.claude/hooks/squad-watch.py", "timeout": 20 }
+        ]
+      }
     ]
   }
 }
@@ -136,10 +151,14 @@ have. Replace `~/.claude` with the absolute path if your shell does not expand
 | Script | Events |
 |---|---|
 | `squad-router.py` | `UserPromptSubmit` |
-| `squad-watch.py` | `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `SubagentStop`, `Stop` |
+| `squad-watch.py` | `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `SubagentStop`, `Stop`, `PreCompact` |
 
 `squad-switch.py` and `squad-turn.py` are not registered: the watcher starts
 them when needed.
+
+`PreCompact` has no matcher, so it covers both a manual `/compact` and an
+auto-compact. Its timeout is longer because it runs three `git` commands
+before writing the handoff; a timeout never blocks the compaction.
 
 You can adopt the squad in stages. The agents and skills work without any
 hook. The router works without the watcher. The watcher works without herdr.
@@ -384,6 +403,6 @@ itself.
 | No `[squad-watch]` messages at all | Is the hook registered for the event? Is `SQUAD_WATCH=0` set? `~/.claude/squad/watch-errors.log` |
 | The handoff was ordered but the session did not switch | `~/.claude/squad/switches.log` says which check gave up. Outside herdr, this is expected |
 | `squad-turn: command not found` | `~/.local/bin` is not on your `PATH` |
-| A merge is denied and nobody seems to hold the turn | `squad-turn status`. A stale turn clears by itself after `SQUAD_TURN_IDLE` seconds |
+| A merge is denied and nobody seems to hold the turn | `squad-turn status`. A turn whose merge call never came back clears after `SQUAD_TURN_HOLD` (120) seconds; register `PostToolUseFailure` so a failed merge gives it back at once |
 | The handoff comes too early or too late | `session_context.py --session <id> --detail` shows the numbers the watcher used. Then [configuration.md](configuration.md#choosing-your-own-numbers) |
 | An agent is not picked for a request | A project agent with the same role wins. Otherwise check the `description` in `agents/<name>.md` |

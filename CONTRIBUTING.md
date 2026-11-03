@@ -40,6 +40,23 @@ In order of value:
   `priority`), and a pattern that fires on every prompt is noise. Narrowing
   one, with the prompts that misrouted, is a good first contribution.
 
+## Branches: beta and main
+
+Open every pull request against **`beta`**. It is the default branch, so a
+fresh clone and GitHub's compare page already point there. This holds for
+the maintainer's own changes too.
+
+- **`beta`** is what has been reviewed and passed CI. It is what the
+  maintainer runs every day, and what the installer gives you with `--beta`.
+  It can break.
+- **`main`** is the stable line. It moves only when `beta` is promoted to a
+  release, tagged `v0.x.y`, or when a hotfix lands. By default the installer
+  gives you the newest release tag (the tip of `main` until the first one).
+
+A fix for a bug in the stable release still goes to `beta`. The maintainer
+decides whether it also ships as a hotfix. How releases and hotfixes are cut
+is in [docs/releasing.md](docs/releasing.md).
+
 ## Setting up
 
 ```bash
@@ -47,6 +64,8 @@ git clone https://github.com/eduardopin/agenfk-squad.git
 cd agenfk-squad
 python3 tests/test_watch.py
 ```
+
+The clone starts on `beta`. Branch from it.
 
 You do **not** need to run `install.sh` to work on the repository, and you
 should not run it from a development clone unless you want your own Claude
@@ -66,6 +85,7 @@ CLAUDE_CONFIG_DIR=/tmp/claude-test HOME=/tmp/claude-test-home ./install.sh
 python3 tests/test_watch.py
 python3 tests/test_vendor.py
 python3 tests/test_agents.py
+python3 tests/test_heartbeat.py
 python3 -m py_compile hooks/*.py skills/session-context/scripts/session_context.py
 bash -n install.sh
 ```
@@ -158,6 +178,7 @@ makes the agent rigid everywhere else. Explain the reason for the rule instead.
 
 ## Pull requests
 
+- Base branch: `beta`. A pull request against `main` will be asked to change its base to `beta`.
 - One change per pull request. Small ones are reviewed quickly.
 - Fill in the template. The checklist is the review.
 - Commit messages in the imperative, with the reason in the body when it is
@@ -172,12 +193,13 @@ makes the agent rigid everywhere else. Explain the reason for the rule instead.
 | Who gets dispatched for what | `CLAUDE.md`, `hooks/squad-router.py` |
 | What an agent may do | `agents/<name>.md` |
 | When a session is told to hand off | `handoff_math` in `skills/session-context/scripts/session_context.py` |
-| What happens at each hook event | `hooks/squad-watch.py` (`pre_tool`, `post_tool`, `subagent_stop`, `stop`) |
+| What happens at each hook event | `hooks/squad-watch.py` (`pre_tool`, `post_tool`, `subagent_stop`, `stop`, `precompact`) |
 | The dispatch brake | `pre_dispatch` in `hooks/squad-watch.py` |
 | The merge queue | the `turn_*` functions in `hooks/squad-watch.py`, `hooks/squad-turn.py` |
 | The session switch | `hooks/squad-switch.py` |
 | The handoff file format | `skills/clear-pickup/SKILL.md` |
 | The flow | `flows/squad-delivery.json` |
+| How a release is cut | `docs/releasing.md` |
 
 ## Questions
 

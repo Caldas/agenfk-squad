@@ -1,6 +1,6 @@
 {
   "name": "Squad Delivery",
-  "description": "Delivery flow for the agenfk-squad agents (https://github.com/eduardopin/agenfk-squad). Each step names the agent that owns it and the evidence `agenfk verify` must carry: product cuts the card, developer/frontend/infra implement in one worktree per card, tester proves the tests can fail, an independent verifier reviews, attacks and mutates, and only the main session advances the card. Whoever writes does not approve.",
+  "description": "Delivery flow for the agenfk-squad agents (https://github.com/eduardopin/agenfk-squad). Each step names the agent that owns it and the evidence `agenfk verify` must carry: product cuts the card, developer/frontend/infra implement in one worktree per card, tester proves the tests can fail, an independent verifier reviews, attacks and mutates, another model gives the heavy review, and only the main session advances the card. Whoever writes does not approve.",
   "author": "eduardopin",
   "version": "1.0.0",
   "steps": [
@@ -42,16 +42,22 @@
       "order": 5
     },
     {
+      "name": "HEAVY_REVIEW",
+      "label": "Heavy review (other model)",
+      "exitCriteria": "Owner: the main session, which runs `squad-review --card <id>` in the card's worktree on the HEAD that will become the PR. The review is done by a different model from the one that wrote the code, read-only: `codex exec` in a read-only sandbox by default, or the command in `SQUAD_REVIEWER`. This is where the long checks run, before the PR, so that nothing that lands on main is tested again on GitHub. SHIP is required: FIX_FIRST and REJECT send the card back to IMPLEMENT, and a new commit needs a new review of the new HEAD. No reviewer, an error or an answer without a verdict is not a verdict; run it again, never read it as SHIP. Evidence for `agenfk verify`: the HEAD SHA, the reviewer and model, the verdict, and the report attached (`<git dir of the worktree>/squad-review/<sha>.md`).",
+      "order": 6
+    },
+    {
       "name": "VERIFY",
       "label": "Verify",
-      "exitCriteria": "Owner: the main session, which is the only one that advances a card. It checks every acceptance criterion against something that was run, not against a summary: the criterion, the command, the observed result. When the flow asks for a PR, only the `github` agent opens it, and only after the verifier returned SHIP. Merging to the main branch goes through the merge queue: `squad-turn request <PR>`, and on MERGE TURN one `git fetch`, one `git merge origin/main`, the suite, push, merge. Evidence for `agenfk verify`: the criterion-by-criterion table, the PR URL if one exists, and the token cost of the card (`agenfk tokens`).",
-      "order": 6
+      "exitCriteria": "Owner: the main session, which is the only one that advances a card. It checks every acceptance criterion against something that was run, not against a summary: the criterion, the command, the observed result. It then seals the verified SHA with `squad-seal record --card <id> --model <name> --verdict SHIP --evidence <path>`, where the model and the evidence are those of the heavy review; it is this seal that lets the merge through without running the suite again on GitHub. When the flow asks for a PR, only the `github` agent opens it, and only after the verifier returned SHIP. Merging to the main branch goes through the merge queue: `squad-turn request <PR>`, and on MERGE TURN one `git fetch`, one `git merge origin/main`, the suite, push, merge. Evidence for `agenfk verify`: the criterion-by-criterion table, the sealed SHA, the PR URL if one exists, and the token cost of the card (`agenfk tokens`).",
+      "order": 7
     },
     {
       "name": "DONE",
       "label": "Done",
       "exitCriteria": "",
-      "order": 7,
+      "order": 8,
       "isAnchor": true
     }
   ]

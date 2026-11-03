@@ -1,29 +1,25 @@
 #!/usr/bin/env python3
-"""The squad's merge queue: the turn to land on main, one session per repository.
+"""The squad's merge turn: one merge call at a time per repository.
 
-    squad-turn request [PR]   requests the turn (or joins the queue) for this session
-    squad-turn release        gives the turn back, or leaves the queue
-    squad-turn status         who holds the turn, the queue, and what your branch contends for
+    squad-turn request [PR]   records an intent to merge (it blocks nobody)
+    squad-turn release        drops your intent, or gives back a turn you hold
+    squad-turn status         who is merging right now, the intents, and your branch against the trunk
 
-The request is recorded by squad-watch, in the PreToolUse of this very call (it
-is the one that knows which session is talking); this script only shows the
-state. The turn is also requested automatically on the first `gh pr merge`.
-The rules are in the header of squad-watch.py.
-
-    squad-turn call <pane> <session>   (used by the watcher) wakes up the session whose turn it is
+The turn covers only the merge call itself: squad-watch takes it in the
+PreToolUse of the merge and gives it back in the PostToolUse of the same call,
+success or failure; a turn held longer than SQUAD_TURN_HOLD (120 s) expires.
+Before a PR merge the watcher test-merges the PR head into the fetched base and,
+with the seal on, checks the seal (see squad-seal). The rules are in the header
+of squad-watch.py.
 """
 import hashlib
 import json
 import os
-import re
 import subprocess
 import sys
 import time
 
 BASE = os.path.join(os.path.expanduser("~"), ".claude", "squad")
-HERDR = os.environ.get("HERDR_BIN_PATH") or "herdr"
-CALL = ("[squad-watch] MERGE TURN: it is this session's turn in the merge queue. Run `squad-turn status` "
-        "and, if the turn is yours, sync with main once, run the suite and merge the PR.")
 
 
 def git(*args, cwd=None):
@@ -35,12 +31,31 @@ def git(*args, cwd=None):
         return 1, ""
 
 
+def trunks():
+    """The trunk, as squad-watch sees it: `git config squad.trunk`, the remote's
+    default branch (origin/HEAD, or gh when that ref is missing), main, master."""
+    names = git("config", "--get", "squad.trunk")[1].split(",")
+    rc, head = git("symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+    if rc == 0 and head.startswith("origin/"):
+        names.append(head[len("origin/"):])
+    elif git("remote", "get-url", "origin")[0] == 0:
+        try:
+            r = subprocess.run([os.environ.get("SQUAD_GH") or "gh", "repo", "view", "--json", "defaultBranchRef",
+                                "-q", ".defaultBranchRef.name"], capture_output=True, text=True, timeout=8,
+                               stdin=subprocess.DEVNULL)
+            names.append(r.stdout.strip() if r.returncode == 0 else "")
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    names = [n.strip().removeprefix("refs/heads/") for n in names + ["main", "master"]]
+    return [n for n in dict.fromkeys(names) if n and not n.startswith("-")]
+
+
 def age(ts):
     return f"{int((time.time() - ts) / 60)} min"
 
 
 def line(e):
-    return (f"session {e['session'][:8]}" + (f"  PR #{e['pr']}" if e.get("pr") else "")
+    return (f"session {e['session'][:8]}" + (f" (PR #{e['pr']})" if e.get("pr") else "")
             + (f"  {e['branch']}" if e.get("branch") else ""))
 
 
@@ -56,18 +71,19 @@ def status():
             d = json.load(fh)
     except (OSError, ValueError):
         d = {}
-    h, queue = d.get("holder"), d.get("queue") or []
-    print(f"Merge queue of {repo}")
-    print("  holding the turn: " + (f"{line(h)}  (for {age(h['since'])})" if h else "nobody — the next merge goes through"))
-    for i, e in enumerate(queue, 1):
-        print(f"  {i}. {line(e)}  (waiting for {age(e['asked'])})")
+    h, intents = d.get("holder"), d.get("intents") or []
+    print(f"Merge turn of {repo}")
+    print("  merging now: " + (f"{line(h)}  (for {int(time.time() - h['since'])} s)" if h
+                               else "nobody — the next merge goes through"))
+    for i, e in enumerate(intents, 1):
+        print(f"  intent {i}. {line(e)}  (asked {age(e['asked'])} ago)")
     last = d.get("last")
     if last:
         print(f"  last: session {last['session'][:8]}" + (f" PR #{last['pr']}" if last.get("pr") else "")
               + f" — {last['why']}, {age(last['at'])} ago")
     _, mine = git("branch", "--show-current")
-    base = next((b for b in ("origin/main", "origin/master")
-                 if git("rev-parse", "--verify", "-q", b)[0] == 0), "")
+    base = next((f"origin/{b}" for b in trunks()
+                 if git("rev-parse", "--verify", "-q", f"origin/{b}")[0] == 0), "")
     if mine and base:
         rc, out = git("merge-tree", "--write-tree", "--name-only", base, mine)
         if rc == 1:
@@ -77,47 +93,19 @@ def status():
             print(f"  {mine} x {base} (local ref, no fetch): merges without conflict")
         _, own = git("diff", "--name-only", f"{base}...{mine}")
         own = set(own.splitlines())
-        for e in ([h] if h else []) + queue:
+        for e in ([h] if h else []) + intents:
             if e.get("branch") and e["branch"] != mine:
                 _, other = git("diff", "--name-only", f"{base}...{e['branch']}")
                 both = sorted(own & set(other.splitlines()))
                 if both:
                     print(f"  in common with {e['branch']}: " + ", ".join(both[:8]))
     if os.environ.get("SQUAD_WATCH") == "0" or os.environ.get("SQUAD_TURN") == "0":
-        print("  (the queue is turned off by an environment variable: nothing was recorded)")
+        print("  (the merge turn is turned off by an environment variable: nothing was recorded)")
     return 0
-
-
-def agent(pane):
-    try:
-        r = subprocess.run([HERDR, "agent", "get", pane], capture_output=True, text=True, timeout=15)
-        a = json.loads(r.stdout)["result"]["agent"]
-        return (a.get("agent_session") or {}).get("value") or "", a.get("agent_status") or ""
-    except (OSError, subprocess.TimeoutExpired, ValueError, KeyError, TypeError):
-        return "", ""
-
-
-def call(pane, session):
-    """Wakes up the session whose turn it is, if the pane is still its own and
-    it is idle. A working session gets the message from the watcher itself, on
-    the next PostToolUse."""
-    if not re.fullmatch(r"[A-Za-z0-9:_-]{1,40}", pane) or not re.fullmatch(r"[0-9a-f-]{8,64}", session):
-        return 2
-    time.sleep(2)
-    sid, state = agent(pane)
-    if sid != session or state in ("working", "blocked"):
-        return 1
-    try:
-        return subprocess.run([HERDR, "agent", "prompt", pane, CALL], capture_output=True,
-                              timeout=20).returncode
-    except (OSError, subprocess.TimeoutExpired):
-        return 1
 
 
 if __name__ == "__main__":
     a = sys.argv[1:]
-    if a[:1] == ["call"] and len(a) == 3:
-        sys.exit(call(a[1], a[2]))
     if a[:1] and a[0] not in ("request", "release", "status"):
         print(__doc__)
         sys.exit(2)
