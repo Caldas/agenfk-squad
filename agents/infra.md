@@ -76,7 +76,7 @@ silently.
 
 A new or changed workflow goes through these rules; the full method, the
 numbers and the scripts are in the `ci-cost` skill. Measure before cutting
-(`finops`, Meter 3), and never cut tests, review or the mutation gate.
+(`finops`, Meter 3), and never cut tests or review.
 
 - **GitHub bills every job and rounds each one up to the minute.** Fewer,
   heavier jobs win: each job pays a setup and one rounding.

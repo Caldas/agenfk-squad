@@ -49,7 +49,7 @@ with the owner instead of silently mapping a cancelled item to DONE.
 
 ```sh
 agenfk list --project <id> --json > /tmp/cards.json
-python3 -I -B skills/parallel-plan/scripts/waves.py /tmp/cards.json --max-width 4
+python3 -I -B skills/parallel-plan/scripts/waves.py /tmp/cards.json --max-width 6
 ```
 
 JSON output: `waves`, `ready`, `blocked`, `unknown_touches`, `done`,
@@ -73,7 +73,7 @@ primary source files. Resolve uncertainty before dispatching.
 
 `ready` is only the first wave; later waves assume earlier ones completed.
 Check which ready cards are already running before assigning a session.
-`github` supplies one card/branch/worktree/session per writer, at most four
+`github` supplies one card/branch/worktree/session per writer, at most six
 fronts. Same file means series even across worktrees. The main session alone
 dispatches and advances cards; only an independent verifier approves them.
 

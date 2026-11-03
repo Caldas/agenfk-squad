@@ -68,13 +68,14 @@ is the owner's. Without the cap, a reviewer and an implementer will trade
 findings for as long as the budget lasts, which is how one card came to be
 reviewed five times.
 
-The `tester` applies the same idea to tests: a test that has never been seen
-to fail proves nothing, so each new test is shown red by mutating the code it
-targets.
+The same idea applies to tests: a test that only shows the code ran proves
+nothing. The `tester` writes each test against the behaviour its criterion
+names, and the `verifier` reads it for that. The flow has no round that breaks
+production code to grade the tests (owner decision, 16/10/2026).
 
 *Enforced by:* the `tools:` line of `agents/verifier.md`; the reviewer cap in
 the watcher (`SQUAD_MAX_REVIEWS`, a seventh reviewer on the same card is
-denied); the REVIEW, ADVERSARIAL and MUTATE steps of the flow.
+denied); the REVIEW and ADVERSARIAL steps of the flow.
 
 ## 3. Context is a budget
 
