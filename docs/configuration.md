@@ -33,7 +33,7 @@ are taken as given: `SQUAD_MAX_REVIEWS=0` denies every reviewer.
 
 | Variable | Default | Effect |
 |---|---|---|
-| `SQUAD_WATCH` | on | `0` disables the watcher entirely (all five events) |
+| `SQUAD_WATCH` | on | `0` disables the watcher entirely (all seven events) |
 | `SQUAD_SWITCH` | on | `0` disables only the automatic session switch; handoffs are still ordered |
 | `SQUAD_TURN` | on | `0` disables only the merge queue |
 

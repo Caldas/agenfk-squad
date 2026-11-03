@@ -215,6 +215,9 @@ def test_fresh_install_takes_the_latest_release_tag_and_registers_every_hook():
     assert head(h) == REFS["v0.10.0"], "stable is the highest v* tag on main, by version"
     assert_registered(h)
     assert "PostToolUseFailure" in read_settings(h)["hooks"]
+    precompact = read_settings(h)["hooks"].get("PreCompact")
+    assert precompact and "matcher" not in precompact[0], precompact
+    assert precompact[0]["hooks"][0]["timeout"] == 20, precompact
     assert backups(h) == [], "there was nothing to back up"
     assert leftovers(h) == []
     for path in ("agents/developer.md", "hooks/squad-watch.py", "hooks/squad-router.py", "CLAUDE.md"):

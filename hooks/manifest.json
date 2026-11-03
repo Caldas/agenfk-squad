@@ -16,6 +16,11 @@
       "script": "squad-watch.py",
       "timeout": 10,
       "events": ["UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "SubagentStop", "Stop"]
+    },
+    {
+      "script": "squad-watch.py",
+      "timeout": 20,
+      "events": ["PreCompact"]
     }
   ]
 }
