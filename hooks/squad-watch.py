@@ -1825,9 +1825,12 @@ def news_after(transcript, handoff):
             lines = fh.read().split(b"\n")
     except OSError:
         return 0
+    # the transcript is JSON: a Windows path is there with its backslashes escaped (C:\\x\\a.md)
+    names = {handoff.encode(), json.dumps(handoff)[1:-1].encode(),
+             json.dumps(handoff, ensure_ascii=False)[1:-1].encode("utf-8")}
     n = 0
     for raw in reversed(lines):
-        if b'"Write"' in raw and handoff.encode() in raw and b'"assistant"' in raw:
+        if b'"Write"' in raw and any(name in raw for name in names) and b'"assistant"' in raw:
             return n
         if b"<task-notification>" not in raw or b'"user"' not in raw:
             continue

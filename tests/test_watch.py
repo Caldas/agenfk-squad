@@ -630,7 +630,7 @@ def test_wait_survives_a_transient_herdr_failure():
 def test_wait_exits_when_herdr_never_answers_again():
     """A closed pane or herdr down must not keep the waiting process alive forever."""
     h = home()
-    e = dict(os.environ, HOME=h, HERDR_BIN_PATH="/bin/false", SQUAD_SWITCH_BUSY="2")
+    e = dict(os.environ, HOME=h, USERPROFILE=h, HERDR_BIN_PATH="/bin/false", SQUAD_SWITCH_BUSY="2")
     t0 = time.time()
     r = subprocess.run([sys.executable, SWITCH, "wait", "w1:p1", "abcdef12-0009", "/x/t.jsonl", "/x", "1"],
                        env=e, capture_output=True, text=True, timeout=60)
@@ -650,7 +650,7 @@ def test_the_claim_refuses_a_second_switch_of_the_same_session():
     with open(handoff, "rb") as fh:
         digest = hashlib.sha256(fh.read()).hexdigest()
     e = {k: v for k, v in os.environ.items() if not k.startswith(("SQUAD_", "HERDR_"))}
-    e.update(HOME=h, HERDR_BIN_PATH=herdr)
+    e.update(HOME=h, USERPROFILE=h, HERDR_BIN_PATH=herdr)
     def switch():
         return subprocess.run([sys.executable, SWITCH, "w1:p1", sid, handoff, digest], env=e,
                               capture_output=True, text=True, timeout=90).returncode

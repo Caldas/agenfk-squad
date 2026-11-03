@@ -213,6 +213,19 @@ def test_a_reused_copy_is_handed_back_like_a_new_one():
         assert isinstance(first, tuple) and first == second, (first, second)
 
 
+def test_a_result_after_a_windows_handoff_write_is_news():
+    # the transcript holds the path JSON-escaped; the raw path never matches it byte for byte
+    with tempfile.TemporaryDirectory() as tmp:
+        handoff = "C:\\Profiles\\Jos\u00e9\\.claude\\handoffs\\a.md"
+        tr = os.path.join(tmp, "t.jsonl")
+        with open(tr, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [
+                {"type": "tool_use", "name": "Write", "input": {"file_path": handoff, "content": "x"}}]}}) + "\n")
+            fh.write(json.dumps({"type": "user", "message": {"role": "user", "content":
+                                 "<task-notification>\n<task-id>a1</task-id>"}}) + "\n")
+        assert sw.news_after(tr, handoff) == 1
+
+
 def test_without_herdr_the_session_cannot_be_switched():
     old = os.environ.pop("HERDR_PANE_ID", None)
     try:

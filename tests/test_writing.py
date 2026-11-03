@@ -19,6 +19,12 @@ import subprocess
 import sys
 import tempfile
 
+
+if os.name == "nt":
+    # its checks run through bash and POSIX calls (geteuid); the writing skill is not yet verified on Windows
+    print("skipped: the writing skill is not yet verified on Windows")
+    sys.exit(0)
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SKILL = os.path.join(ROOT, "skills", "writing")
 SCRIPTS = os.path.join(SKILL, "scripts")

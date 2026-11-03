@@ -369,8 +369,8 @@ directory if you want it gone.
 - **Not yet verified on Windows:** the board heartbeat
   (`skills/board-heartbeat`), the heavy review (`hooks/squad-review.py`), the
   merge seal (`hooks/squad-seal.py`, `git config squad.seal`), and the
-  scripts of the cloud-resource pricing guard, the design bridge and the
-  pull-request skill. Their tests say so and exit 0 on Windows. Leave the
+  scripts of the cloud-resource pricing guard, the design bridge, the
+  pull-request skill and the writing skill. Their tests say so and exit 0 on Windows. Leave the
   seal off there.
 - **Paths in a Bash command.** The merge turn follows `cd C:/work/repo` and
   `cd /c/work/repo`, the forms Git Bash takes. A backslash path
