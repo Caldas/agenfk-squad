@@ -87,7 +87,8 @@ def test_omp_tool_names_reach_the_watcher_brakes_in_its_dialect():
     # the translation is what the watcher's brakes key on
     assert "Write" in sw.MUTATING and "Edit" in sw.MUTATING
     merge = br.payload({**base, "tool_name": "bash", "tool_input": {"command": "gh pr merge 99"}})
-    assert sw.turn_kind(merge) == ("merge", "99"), sw.turn_kind(merge)
+    # turn_kind is (merge, shown, target, dir) since the merge-seal change: the PR and its target must reach the brake
+    assert sw.turn_kind(merge)[:3] == ("merge", "99", ("99", "")), sw.turn_kind(merge)
 
 
 def test_payload_carries_client_omp_and_the_agent():

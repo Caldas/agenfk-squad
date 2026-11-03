@@ -211,6 +211,6 @@ itself.
 | No `[squad-watch]` messages at all | Is the hook registered for the event? Is `SQUAD_WATCH=0` set? `~/.claude/squad/watch-errors.log` |
 | The handoff was ordered but the session did not switch | `~/.claude/squad/switches.log` says which check gave up. Outside herdr, this is expected |
 | `squad-turn: command not found` | `~/.local/bin` is not on your `PATH` |
-| A merge is denied and nobody seems to hold the turn | `squad-turn status`. A stale turn clears by itself after `SQUAD_TURN_IDLE` seconds |
+| A merge is denied and nobody seems to hold the turn | `squad-turn status`. A turn whose merge call never came back clears after `SQUAD_TURN_HOLD` (120) seconds; register `PostToolUseFailure` so a failed merge gives it back at once |
 | The handoff comes too early or too late | `session_context.py --session <id> --detail` shows the numbers the watcher used. Then [configuration.md](configuration.md#choosing-your-own-numbers) |
 | An agent is not picked for a request | A project agent with the same role wins. Otherwise check the `description` in `agents/<name>.md` |
