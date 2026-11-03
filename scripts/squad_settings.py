@@ -28,6 +28,12 @@ docs/installation.md (`python3 ~/.claude/hooks/squad-watch.py`) are
 recognised, kept on install and removed on uninstall, while a hook of the
 user's that merely shares a file name (`python3 /opt/mine/squad-watch.py`,
 `grep squad-router.py log`) is never touched.
+
+The manifest decides each squad hook's matcher: a hook's own "matchers"
+({event: matcher}, where null means no matcher) wins over the top-level one.
+A squad entry found under any other matcher on that event (moved by hand, or
+left by an older manifest) is moved to the manifest's, so a narrow hook never
+stays registered on every tool call.
 """
 import contextlib
 import argparse
@@ -46,6 +52,10 @@ class Refused(Exception):
     """settings.json cannot be edited safely; nothing was written."""
 
 
+class BadManifest(Exception):
+    """The hook manifest says something install cannot act on; nothing was written."""
+
+
 def default_config():
     return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
 
@@ -54,11 +64,21 @@ def load_manifest(path):
     with open(path, encoding="utf-8") as fh:
         m = json.load(fh)
     matchers = m.get("matchers", {})
-    plan = {}                                # event -> [(script, timeout)], in manifest order
+    plan = {}                                # event -> [(script, timeout, matcher)], in manifest order
     for h in m["hooks"]:
+        own = h.get("matchers", {})          # a hook's own matcher wins for its event
+        if not isinstance(own, dict):
+            raise BadManifest(f'{path}: "matchers" of {h["script"]} is not an object')
+        unknown = set(own) - set(h["events"])
+        if unknown:                          # a typo here would fall back to the broad matcher
+            raise BadManifest(f'{path}: {h["script"]} has matchers for events it does not list: '
+                              f'{", ".join(sorted(unknown))}')
         for event in h["events"]:
-            plan.setdefault(event, []).append((h["script"], h.get("timeout")))
-    return plan, matchers, [h["script"] for h in m["hooks"]]
+            matcher = own.get(event, matchers.get(event))
+            if matcher is not None and not isinstance(matcher, str):
+                raise BadManifest(f'{path}: the matcher of {h["script"]} on {event} is not a string: {matcher!r}')
+            plan.setdefault(event, []).append((h["script"], h.get("timeout"), matcher))
+    return plan, [h["script"] for h in m["hooks"]]
 
 
 def load_settings(path):
@@ -116,29 +136,68 @@ def command_for(config, script):
     return "python3 " + shlex.quote(os.path.join(config, "hooks", script))
 
 
-def install(settings, config, plan, matchers, report):
-    """Adds what is missing. Returns True when settings changed."""
+def runs(group, script, config):
+    return any(isinstance(h, dict) and squad_script(h.get("command"), config) == script
+               for h in group.get("hooks", []))
+
+
+def drop(settings, event, script, config, matcher):
+    """Removes this script's entries from the event's groups under any matcher
+    but this one, and the groups that only held them. Every other entry keeps
+    its group and its place."""
+    kept = []
+    for g in settings["hooks"][event]:
+        if g.get("matcher") == matcher:
+            kept.append(g)
+            continue
+        entries = [h for h in g.get("hooks", [])
+                   if not (isinstance(h, dict) and squad_script(h.get("command"), config) == script)]
+        if len(entries) == len(g.get("hooks", [])):
+            kept.append(g)
+        elif entries:
+            kept.append(dict(g, hooks=entries))
+    settings["hooks"][event] = kept
+
+
+def install(settings, config, plan, report):
+    """Adds what is missing, and moves a squad hook whose matcher the manifest
+    changed. Returns True when settings changed."""
     changed = False
     for event, wanted in plan.items():
-        groups = settings.get("hooks", {}).get(event, [])
-        missing = []
-        for script, timeout in wanted:
-            there = any(squad_script(h.get("command"), config) == script
-                        for g in groups for h in g.get("hooks", []) if isinstance(h, dict))
-            if there:
-                report.append(f"on      {script:<16} {event} (already registered)")
-            elif not os.path.exists(os.path.join(config, "hooks", script)):
+        missing = {}                         # matcher -> entries, one group per matcher
+        for script, timeout, matcher in wanted:
+            groups = settings.get("hooks", {}).get(event, [])
+            right = any(runs(g, script, config) and g.get("matcher") == matcher for g in groups)
+            stale = any(runs(g, script, config) and g.get("matcher") != matcher for g in groups)
+            if right:
+                if stale:                    # a second copy would still run on every tool call
+                    drop(settings, event, script, config, matcher)
+                    changed = True
+                    report.append(f"on      {script:<16} {event} (copy under another matcher removed)")
+                else:
+                    report.append(f"on      {script:<16} {event} (already registered)")
+                continue
+            if not os.path.exists(os.path.join(config, "hooks", script)):
+                left = ""
+                if stale:                    # it would fail on every tool call it still matches
+                    drop(settings, event, script, config, matcher)
+                    changed = True
+                    left = "; its old registration was removed"
                 report.append(f"SKIPPED {script:<16} {event}: {os.path.join(config, 'hooks', script)} "
-                              "does not exist (did install.sh skip it?)")
+                              f"does not exist (did install.sh skip it?){left}")
+                continue
+            if stale:
+                drop(settings, event, script, config, matcher)
+                report.append(f"on      {script:<16} {event} (moved to matcher {matcher or 'none'})")
             else:
-                entry = {"type": "command", "command": command_for(config, script)}
-                if timeout:
-                    entry["timeout"] = timeout
-                missing.append(entry)
                 report.append(f"on      {script:<16} {event} (added)")
-        if missing:
-            group = {"matcher": matchers[event]} if event in matchers else {}
-            group["hooks"] = missing
+            entry = {"type": "command", "command": command_for(config, script)}
+            if timeout:
+                entry["timeout"] = timeout
+            missing.setdefault(matcher, []).append(entry)
+        for matcher, entries in missing.items():
+            group = {"matcher": matcher} if matcher is not None else {}
+            group["hooks"] = entries
             settings.setdefault("hooks", {}).setdefault(event, []).append(group)
             changed = True
     return changed
@@ -222,10 +281,14 @@ def main(argv=None):
         return 2
     if a.action == "check":
         return 0
-    plan, matchers, scripts = load_manifest(a.manifest)
+    try:
+        plan, scripts = load_manifest(a.manifest)
+    except BadManifest as e:
+        print(f"ERROR   {e}", file=sys.stderr)
+        return 2
     report = []
     if a.action == "install":
-        changed = install(settings, config, plan, matchers, report)
+        changed = install(settings, config, plan, report)
     else:
         changed = uninstall(settings, config, set(scripts), report)
     for line in report:

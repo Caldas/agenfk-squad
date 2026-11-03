@@ -12,6 +12,7 @@ on:
       - scripts/squad_settings.py
       - hooks/manifest.json
       - tests/test_get.py
+      - tests/test_squad_settings.py
       - .github/workflows/installer.yml
   pull_request:
     paths:
@@ -20,6 +21,7 @@ on:
       - scripts/squad_settings.py
       - hooks/manifest.json
       - tests/test_get.py
+      - tests/test_squad_settings.py
       - .github/workflows/installer.yml
 
 permissions:
@@ -49,3 +51,5 @@ jobs:
         run: python -m py_compile scripts/squad_settings.py
       - name: Installer test suite (throwaway HOME, file:// clone)
         run: python tests/test_get.py
+      - name: Settings writer unit tests (per-hook matchers)
+        run: python tests/test_squad_settings.py

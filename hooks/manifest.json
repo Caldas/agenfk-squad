@@ -1,5 +1,5 @@
 {
-  "comment": "Which hook runs on which Claude Code event. The single source for scripts/squad_settings.py, which registers and removes these entries in settings.json. Events missing from 'matchers' get no matcher. A harness without an event ignores its entry.",
+  "comment": "Which hook runs on which Claude Code event. The single source for scripts/squad_settings.py, which registers and removes these entries in settings.json. Events missing from 'matchers' get no matcher. A hook may carry its own 'matchers' ({event: matcher}), which wins over the top-level one for that hook and event (null there means no matcher, and an event the hook does not list is refused); hooks with different matchers on one event go in separate groups. A harness without an event ignores its entry.",
   "matchers": {
     "UserPromptSubmit": "*",
     "PreToolUse": "*",
