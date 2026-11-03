@@ -249,7 +249,7 @@ def plan(cards, width):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('cards', help='JSON file or - for stdin')
-    p.add_argument('--max-width', type=int, default=4, choices=range(1, 5))
+    p.add_argument('--max-width', type=int, default=6, choices=range(1, 7))
     args = p.parse_args()
     try:
         raw = sys.stdin.read() if args.cards == '-' else Path(args.cards).read_text(encoding='utf-8')

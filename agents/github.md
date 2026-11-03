@@ -58,7 +58,7 @@ thread resolution and session wakeups behind owner confirmation. No auto-merge.
 2. **Plan of fronts** for what the main session or `product` wants to
    parallelise: a table with card, base (SHA), branch, worktree, files the front
    may touch, agent, evidence of done. Two fronts on the same file become one,
-   or run in series. Ceiling of ~4.
+   or run in series. Ceiling of ~6.
 3. **Open the front:** `agenfk branch create|link <id>`, `git worktree add`,
    writer claim in the worktree's git dir. Return the worktree path to whoever
    is going to dispatch the `developer`/`frontend`/`tester`.

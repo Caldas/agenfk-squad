@@ -48,7 +48,7 @@ Before dispatching in parallel, write the table:
   front writes to them; the others hand back the text.
 - Real dependency: B touches the same files as A, or consumes the contract A
   changes. The rest is convention and can move together.
-- **Ceiling: ~4 simultaneous fronts.** Above that, queue — the limit is the
+- **Ceiling: ~6 simultaneous fronts.** Above that, queue — the limit is the
   review ceiling, not the CPU.
 - Note the SHA of each base: it is what "did it do anything" is measured
   against.

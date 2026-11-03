@@ -100,7 +100,12 @@ class WaveTests(unittest.TestCase):
                      [card('a', touches=['c:/absolute'])], [card('a', touches=['c:\\\\absolute'])]):
             self.assertEqual(self.run_plan(data).returncode, 2, data)
         self.assertEqual(self.run_plan([card('a')], '--max-width', '0').returncode, 2)
-        self.assertEqual(self.run_plan([card('a')], '--max-width', '5').returncode, 2)
+        self.assertEqual(self.run_plan([card('a')], '--max-width', '7').returncode, 2)
+
+    def test_default_and_maximum_width_is_six_fronts(self):
+        data = [card(c) for c in 'abcdefg']
+        self.assertEqual([len(w) for w in self.result(data)['waves']], [6, 1])
+        self.assertEqual([len(w) for w in self.result(data, '--max-width', '6')['waves']], [6, 1])
 
     def test_help_and_no_execution(self):
         p = subprocess.run([sys.executable, '-I', '-B', str(SCRIPT), '--help'], capture_output=True)
