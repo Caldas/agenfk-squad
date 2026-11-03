@@ -58,8 +58,11 @@ def test_every_test_file_is_run_somewhere_on_linux():
     installer_steps = steps(INSTALLER)
     everywhere = [st for st in installer_steps if "runner.os == 'Windows'" not in st]
     ran = " ".join(linux_steps) + " " + " ".join(everywhere)
-    missing = [os.path.basename(p) for p in sorted(glob.glob(os.path.join(ROOT, "tests", "test_*.py")))
-               if os.path.basename(p) not in ran]
+    # a live Linux step that runs tests/test_*.py by glob runs every file, the new ones too
+    by_glob = any(re.search(r"(?:files=\(|for t in )tests/test_\*\.py\b", st) and 'python -B "$t"' in st
+                  for st in linux_steps)
+    missing = [] if by_glob else [os.path.basename(p) for p in sorted(glob.glob(os.path.join(ROOT, "tests", "test_*.py")))
+                                  if os.path.basename(p) not in ran]
     # the PowerShell installers say so and exit 0 on Linux, and run for real in the Windows-only installer step
     assert not missing, f"not run by a live step of the Linux job or the installer workflow: {missing}"
     win_only = " ".join(st for st in installer_steps if "runner.os == 'Windows'" in st)
