@@ -1,6 +1,6 @@
 {
   "name": "Squad Delivery",
-  "description": "Delivery flow for the agenfk-squad agents (https://github.com/eduardopin/agenfk-squad). Each step names the agent that owns it and the evidence `agenfk verify` must carry: product cuts the card, developer/frontend/infra implement in one worktree per card, tester proves the tests can fail, an independent verifier reviews, attacks and mutates, another model gives the heavy review, and only the main session advances the card. Whoever writes does not approve.",
+  "description": "Delivery flow for the agenfk-squad agents (https://github.com/eduardopin/agenfk-squad). Each step names the agent that owns it and the evidence `agenfk verify` must carry: product cuts the card, developer/frontend/infra implement in one worktree per card, tester writes and runs the card's tests, an independent verifier reviews and attacks, another model gives the heavy review, and only the main session advances the card. Whoever writes does not approve.",
   "author": "eduardopin",
   "version": "1.0.0",
   "steps": [
@@ -20,13 +20,13 @@
     {
       "name": "TEST",
       "label": "Test",
-      "exitCriteria": "Owner: the `tester` agent, in a separate session from the one that wrote the code. It edits test files only. Tests cover the happy path, the edges and the failure modes named in the acceptance criteria; a defect found by running the system becomes a regression test. For each new test the agent shows it can fail: it breaks the production code the test targets, watches the test go red, and restores the code. Evidence for `agenfk verify`: the list of tests added, the suite command and result, and for each new test the mutation applied and the failure it produced.",
+      "exitCriteria": "Owner: the `tester` agent, in a separate session from the one that wrote the code. It edits test files only. Tests cover the happy path, the edges and the failure modes named in the acceptance criteria; a defect found by running the system becomes a regression test. The flow has no round that breaks production code to grade the tests (owner decision, 16/10/2026); the tests assert the behaviour each criterion names, not only that the code ran. The working tree is clean outside the test files at the end. Evidence for `agenfk verify`: the base and branch counts as measured, the list of tests added, and the suite command and result.",
       "order": 2
     },
     {
       "name": "REVIEW",
       "label": "Review",
-      "exitCriteria": "Owner: the `verifier` agent, read-only, in a clean context. Whoever wrote the code does not approve it: brief the verifier with the card id and the branch, never with the implementer's account of the work. The verifier reads the diff against the acceptance criteria, runs the suite itself, and returns SHIP, FIX_FIRST or REJECT with each finding tied to a file and line. FIX_FIRST and REJECT go back to the agent that implemented, for at most two rounds; after that the decision is the owner's. Evidence for `agenfk verify`: the verdict, the suite result as run by the verifier, the findings and which of them were fixed or rejected and why.",
+      "exitCriteria": "Owner: the `verifier` agent, read-only, in a clean context. Whoever wrote the code does not approve it: brief the verifier with the card id and the branch, never with the implementer's account of the work. The verifier reads the diff against the acceptance criteria, runs the suite itself, ties each acceptance criterion to evidence, judges test strength by reading and by the suite it reproduced (it never breaks production code to grade the tests), and returns SHIP, FIX_FIRST or REJECT with each finding tied to a file and line. FIX_FIRST and REJECT go back to the agent that implemented, for at most two rounds; after that the decision is the owner's. Evidence for `agenfk verify`: the verdict, the suite result as run by the verifier, the findings and which of them were fixed or rejected and why.",
       "order": 3
     },
     {
@@ -36,28 +36,22 @@
       "order": 4
     },
     {
-      "name": "MUTATE",
-      "label": "Mutate",
-      "exitCriteria": "Owner: the `verifier` agent. It mutates the production code changed by the card (flip a condition, drop a branch, change a boundary, remove a call) one mutation at a time, runs the suite, and restores the tree after each one. A mutation that survives is a missing test and goes back to the `tester`. The working tree is clean at the end (`git status --short` is empty). Evidence for `agenfk verify`: the mutations applied, killed versus survived, and the tests added for the survivors.",
-      "order": 5
-    },
-    {
       "name": "HEAVY_REVIEW",
       "label": "Heavy review (other model)",
       "exitCriteria": "Owner: the main session, which runs `squad-review --card <id>` in the card's worktree on the HEAD that will become the PR. The review is done by a different model from the one that wrote the code, read-only: `codex exec` in a read-only sandbox by default, or the command in `SQUAD_REVIEWER`. This is where the long checks run, before the PR, so that nothing that lands on main is tested again on GitHub. SHIP is required: FIX_FIRST and REJECT send the card back to IMPLEMENT, and a new commit needs a new review of the new HEAD. No reviewer, an error or an answer without a verdict is not a verdict; run it again, never read it as SHIP. Evidence for `agenfk verify`: the HEAD SHA, the reviewer and model, the verdict, and the report attached (`<git dir of the worktree>/squad-review/<sha>.md`).",
-      "order": 6
+      "order": 5
     },
     {
       "name": "VERIFY",
       "label": "Verify",
       "exitCriteria": "Owner: the main session, which is the only one that advances a card. It checks every acceptance criterion against something that was run, not against a summary: the criterion, the command, the observed result. It then seals the verified SHA with `squad-seal record --card <id> --model <name> --verdict SHIP --evidence <path>`, where the model and the evidence are those of the heavy review; it is this seal that lets the merge through without running the suite again on GitHub. When the flow asks for a PR, only the `github` agent opens it, and only after the verifier returned SHIP. Merging to the main branch goes through the merge queue: `squad-turn request <PR>`, and on MERGE TURN one `git fetch`, one `git merge origin/main`, the suite, push, merge. Evidence for `agenfk verify`: the criterion-by-criterion table, the sealed SHA, the PR URL if one exists, and the token cost of the card (`agenfk tokens`).",
-      "order": 7
+      "order": 6
     },
     {
       "name": "DONE",
       "label": "Done",
       "exitCriteria": "",
-      "order": 8,
+      "order": 7,
       "isAnchor": true
     }
   ]

@@ -24,7 +24,7 @@ is advice; an agent with no `Edit` and no `Write` cannot edit files. Read the
 | [`frontend`](#frontend) | IMPLEMENT | Read, Grep, Glob, Edit, Write, Bash, WebFetch, WebSearch | Yes | inherit |
 | [`infra`](#infra) | IMPLEMENT | Read, Grep, Glob, Edit, Write, Bash | Yes, stops at `plan` | inherit |
 | [`tester`](#tester) | TEST | Read, Grep, Glob, Edit, Write, Bash | Test files only | Sonnet |
-| [`verifier`](#verifier) | REVIEW, ADVERSARIAL, MUTATE, VERIFY | Read, Grep, Glob, Bash | No | Sonnet |
+| [`verifier`](#verifier) | REVIEW, ADVERSARIAL, VERIFY | Read, Grep, Glob, Bash | No | Sonnet |
 | [`finops`](#finops) | before a stack or cloud decision | Read, Grep, Glob, Bash, WebFetch, WebSearch | No | inherit |
 | [`finance`](#finance) | on request | Read, Grep, Glob, Bash, WebFetch, WebSearch | No | inherit |
 | [`gtm`](#gtm) | on request | Read, Grep, Glob, Bash, WebFetch, WebSearch | No (drafts only) | inherit |
@@ -37,7 +37,7 @@ Two notes on that table.
   missing tool. Tightening this with per-agent permission rules is on the
   [roadmap](../ROADMAP.md).
 - `tester`, `verifier` and `context` run on Sonnet on purpose. Their work is
-  mechanical and high-volume (run the suite, mutate, measure), a cheaper model
+  mechanical and high-volume (run the suite, check the evidence, measure), a cheaper model
   does it well, and a reviewer on a different model than the author shares
   fewer of its blind spots.
 
@@ -138,16 +138,16 @@ design before it becomes code: cost, IAM, network, persistence, rollback.
 
 ## tester
 
-**Writes the card's tests and proves each one can fail.**
+**Writes and runs the card's tests.**
 
-Happy path, edges and failures. For every new test it mutates the production
-code the test targets, watches the test go red, and restores the code. A
-defect found by running the system becomes a regression test.
+Happy path, edges and failures. A defect found by running the system becomes
+a regression test. The flow has no round that breaks production code to grade
+the tests (owner decision, 16/10/2026).
 
 - **Dispatch when:** after every implementation; a defect needs a regression
   test; coverage needs to rise.
-- **Returns:** the tests added, the suite result, and for each test the
-  mutation that made it fail. Logged on the card.
+- **Returns:** the base and branch counts as measured, the tests added and
+  the suite result. Logged on the card.
 - **Never:** edits anything but test files. If the code is wrong, it reports;
   it does not fix.
 
@@ -156,16 +156,17 @@ defect found by running the system becomes a regression test.
 **Independent reviewer, read-only, in a clean context.**
 
 Judges a card's branch against its acceptance criteria. Runs the suite itself,
-mutates production code to prove the tests fail, hunts for regressions, broken
-integration and security flaws.
+ties each criterion to evidence, judges test strength by reading and by the
+suite it reproduced (it never breaks production code), and hunts for regressions, broken integration and security flaws.
 
-- **Dispatch when:** REVIEW, ADVERSARIAL, MUTATE and VERIFY of any flow;
+- **Dispatch when:** REVIEW, ADVERSARIAL and VERIFY of any flow;
   before every PR; whenever the one asking for approval is the one who wrote
   the code.
 - **Brief with:** the card id and the branch. **Not** the implementer's
   account of the work.
 - **Returns:** `SHIP`, `FIX_FIRST` or `REJECT`, with blockers, warnings, the
-  suite as reproduced, mutation results and integration results.
+  suite as reproduced, the criterion-by-criterion evidence and integration
+  results.
 - **Never:** fixes what it finds. It has no `Edit` and no `Write`.
 - **Cap:** two `FIX_FIRST`/`REJECT` rounds per card; the watcher denies a
   seventh reviewer dispatch on the same card.

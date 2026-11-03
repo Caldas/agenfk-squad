@@ -52,10 +52,9 @@ in the format of the community registry. Its steps line up with the agents.
 |---|---|---|---|
 | **TODO** | `product` (plus `github` for parallel work) | `agenfk create`, `agenfk verify` | Acceptance criteria as written on the card; for parallel work, the worktree path and branch |
 | **IMPLEMENT** | `developer`, `frontend` or `infra` | `agenfk gatekeeper --item-id <id>` before editing | Branch, commit SHAs, the suite command and its result, anything left out |
-| **TEST** | `tester` | `agenfk gatekeeper`, `agenfk log-test` | Tests added, suite result, and for each new test the mutation that made it fail |
+| **TEST** | `tester` | `agenfk gatekeeper`, `agenfk log-test` | Base and branch counts as measured, tests added, suite result |
 | **REVIEW** | `verifier` | `agenfk comment` with the verdict | `SHIP`/`FIX_FIRST`/`REJECT`, the suite as run by the verifier, findings and their resolution |
 | **ADVERSARIAL** | `verifier`, fresh session | `agenfk comment` | Each attack tried and what happened; the verdict |
-| **MUTATE** | `verifier` | `agenfk comment` | Mutations applied, killed versus survived, tests added for survivors, a clean tree |
 | **VERIFY** | main session | `agenfk verify`, `agenfk tokens` | Criterion-by-criterion table (criterion, command, observed result), PR URL, token cost |
 | **DONE** | | | The server runs the project's `verifyCommand` |
 
@@ -71,15 +70,17 @@ memory of this document.
 - **ADVERSARIAL separate from REVIEW.** A review confirms the change does what
   the card says. An adversarial pass tries to make it do something else. Asked
   to do both at once, a reviewer does the first and calls it the second.
-- **MUTATE last among the checks.** Mutation is the slowest check and the one
-  most worth skipping when the earlier ones already failed.
+- **No step that breaks code to grade the tests.** It was the slowest check
+  and is out of the flow (owner decision, 16/10/2026). The verifier does not
+  break production code; it judges test strength by reading and by the suite
+  it reproduced.
 - **VERIFY by the main session.** The session that advances the card must
   hold the evidence itself. It did not write the code and did not review it;
   it checks that each criterion maps to something that was run.
 
-A shorter flow is fine for a small project. Drop ADVERSARIAL and MUTATE and
-the agents still work: `CLAUDE.md` routes any of REVIEW, ADVERSARIAL, MUTATE
-and VERIFY to the `verifier` when the active flow has them. With AgenFK's
+A shorter flow is fine for a small project. Drop ADVERSARIAL and the agents
+still work: `CLAUDE.md` routes any of REVIEW, ADVERSARIAL and VERIFY to the
+`verifier` when the active flow has them. With AgenFK's
 default flow (`TODO → IN_PROGRESS → REVIEW → TEST → DONE`) `developer` takes
 IN_PROGRESS, `verifier` takes REVIEW and `tester` takes TEST.
 
@@ -149,7 +150,7 @@ project has active. The agents match on step **names**:
 | `TODO` | `product` |
 | `IMPLEMENT`, `IN_PROGRESS` | `developer` (or `frontend`, `infra`) |
 | `TEST` | `tester` |
-| `REVIEW`, `ADVERSARIAL`, `MUTATE`, `VERIFY` | `verifier` |
+| `REVIEW`, `ADVERSARIAL`, `VERIFY` | `verifier` |
 
 A step with another name is handled by the main session following that step's
 exit criteria, unless your project's `CLAUDE.md` maps it to an agent.

@@ -92,7 +92,7 @@ The commands and the order of the cuts are in the `ci-cost` skill.
 
 ## Never
 
-**Never** recommend cutting independent review, tests or the mutation gate to
+**Never** recommend cutting independent review or tests to
 save money.
 
 You do not create resources, do not change a billing plan and do not advance a
