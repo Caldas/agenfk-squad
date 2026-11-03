@@ -97,6 +97,37 @@ def test_vendored_binary_and_git_files_are_left_alone():
         assert r.returncode == 0, r.stdout
 
 
+def test_the_git_file_of_a_worktree_is_left_alone():
+    # `git worktree add` writes .git as a file: "gitdir: <absolute path of the main clone>/.git/worktrees/x"
+    rc, out = check({".git": "gitdir: " + POSIX_HOME + "alice/repo/.git/worktrees/x\n"})
+    assert rc == 0, out
+
+
+def test_outside_git_the_agent_folders_are_read_too():
+    for rel in (".claude/settings.local.json", ".agenfk/project.json"):
+        rc, out = check({rel: POSIX_HOME + "alice/\n"})
+        assert rc == 1 and rel in out.replace("\\", "/"), (rel, out)
+
+
+def test_in_a_work_tree_what_git_would_publish_is_read_and_ignored_files_are_not():
+    with tempfile.TemporaryDirectory() as tree:
+        def write(rel, text):
+            path = os.path.join(tree, *rel.split("/"))
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(text)
+        subprocess.run(["git", "init", "-q", tree], check=True)
+        write(".gitignore", "local/\n")
+        write("local/notes.md", POSIX_HOME + "alice/\n")             # ignored: never published
+        write("docs/ok.md", "clean\n")
+        subprocess.run(["git", "-C", tree, "add", "."], check=True)
+        r = subprocess.run([sys.executable, CHECK, tree], capture_output=True, text=True, encoding="utf-8")
+        assert r.returncode == 0, r.stdout
+        write("docs/new.md", POSIX_HOME + "alice/\n")                # untracked, not ignored: one commit away
+        r = subprocess.run([sys.executable, CHECK, tree], capture_output=True, text=True, encoding="utf-8")
+        assert r.returncode == 1 and "new.md:1:" in r.stdout, r.stdout
+
+
 def test_this_repository_is_clean():
     r = subprocess.run([sys.executable, CHECK, ROOT], capture_output=True, text=True, encoding="utf-8")
     assert r.returncode == 0, r.stdout + r.stderr

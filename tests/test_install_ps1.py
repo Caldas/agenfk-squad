@@ -79,10 +79,21 @@ def points_into(path, repo):
     return real.startswith(os.path.normcase(os.path.realpath(repo)) + os.sep)
 
 
+def is_junction(path):
+    """os.path.isjunction exists from Python 3.12; the installer accepts 3.10, so read the reparse tag."""
+    if hasattr(os.path, "isjunction"):
+        return os.path.isjunction(path)
+    try:
+        info = os.lstat(path)
+    except OSError:
+        return False
+    return getattr(info, "st_reparse_tag", 0) == 0xA0000003          # IO_REPARSE_TAG_MOUNT_POINT
+
+
 def is_squad_link(path, repo):
     """A link (junction or symbolic) into the repo, or a copy with the repo file's bytes."""
     return os.path.islink(path) and points_into(path, repo) or (
-        os.path.isjunction(path) and points_into(path, repo))
+        is_junction(path) and points_into(path, repo))
 
 
 def test_a_fresh_install_links_directories_and_copies_files_with_a_mark():
@@ -194,7 +205,7 @@ def test_the_squad_turn_command_runs_from_the_shim():
     shim = os.path.join(h, ".local", "bin", "squad-turn.cmd")
     e = dict(os.environ, HOME=h, USERPROFILE=h)
     r = subprocess.run(["cmd", "/c", shim, "status"], capture_output=True, text=True, env=e, cwd=work, timeout=120)
-    assert r.returncode == 0 and "Merge queue of" in r.stdout, (r.stdout, r.stderr)
+    assert r.returncode == 0 and "Merge turn of" in r.stdout, (r.stdout, r.stderr)
 
 
 def test_oh_my_pi_gets_its_extension_and_its_agents_when_omp_is_on_the_path():
@@ -222,9 +233,15 @@ def test_a_profile_with_an_accent_still_runs_the_shim():
     clone = os.path.join(h, "José clone")
     shutil.copytree(repo, clone)
     assert run(clone, h, "-NoSymlink").returncode == 0
+    with open(shim, "rb") as fh:
+        assert all(b < 0x80 for b in fh.read()), "the shim holds no path: any console code page reads it"
+    with open(os.path.join(h, ".local", "bin", "squad-turn.path"), encoding="utf-8") as fh:
+        target = fh.read().strip()
+    same = lambda a: os.path.normcase(os.path.realpath(a))
+    assert same(target) == same(os.path.join(clone, "hooks", "squad-turn.py")), target
     e = dict(os.environ, HOME=h, USERPROFILE=h)
     r = subprocess.run(["cmd", "/c", shim, "status"], capture_output=True, text=True, env=e, cwd=work, timeout=120)
-    assert r.returncode == 0 and "Merge queue of" in r.stdout, (r.stdout, r.stderr)
+    assert r.returncode == 0 and "Merge turn of" in r.stdout, (r.stdout, r.stderr)
 
 
 def test_a_relative_config_dir_means_where_the_user_is_standing():
@@ -289,6 +306,7 @@ def test_uninstall_removes_what_the_squad_made_and_keeps_what_is_not_its_own():
     assert not os.path.lexists(os.path.join(cfg, "hooks", "squad-watch.py"))
     assert not os.path.lexists(os.path.join(cfg, "agents", "verifier.md"))
     assert not os.path.lexists(os.path.join(h, ".local", "bin", "squad-turn.cmd"))
+    assert not os.path.lexists(os.path.join(h, ".local", "bin", "squad-turn.path"))
     assert read(os.path.join(cfg, "agents", "mine.md")) == "mine\n"
     assert "My own note." in read(os.path.join(cfg, "agents", "developer.md"))             # kept, and said so
     assert "edited" in r.out and "developer.md" in r.out, r.out

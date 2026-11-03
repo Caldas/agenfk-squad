@@ -14,14 +14,18 @@ What counts:
 What does not: the system profiles (Public, Default, Default User, All Users, Shared, Guest), a placeholder
 (<you>, %USERNAME%, $env...), `..` or `.` standing where a name would, a word that only ends in a letter and a
 colon before /users (`GET:/users/42`, `https://users/x`), and any directory that is not under Users.
+What is read: in a git work tree (ROOT is its top), the files git would publish, tracked or untracked but
+not ignored; elsewhere, every file under ROOT. The .git of a worktree is a file holding an absolute
+`gitdir:` path, so it is skipped whether it is a file or a directory.
 Left alone: .git, vendor (third-party text, pinned by skills/vendor/LOCK), caches, and binary files. Text in
 UTF-16 (a byte-order mark first, as Windows tools write it) is read as text.
 """
 import os
 import re
+import subprocess
 import sys
 
-SKIP_DIRS = {".git", "vendor", "__pycache__", "node_modules", ".agenfk", ".claude"}
+SKIP_DIRS = {".git", "vendor", "__pycache__", "node_modules"}
 SYSTEM = r"(?:public|default|default user|all users|shared|guest)"
 NOT_A_NAME = r"(?!\.+[\\/]|\.+$)"                 # `..` is a path segment, not a person
 NAME_START = r"[^\\/<>{}$%*\"'`\s]"                # a name that starts like this is a placeholder, not a person
@@ -44,23 +48,53 @@ def read_text(data):
     return data.decode("utf-8", "replace")
 
 
+def published(root):
+    """The files git would publish from ROOT (relative, `/`-separated), or None when ROOT is not the top of
+    a work tree or git cannot say."""
+    try:
+        top = subprocess.run(["git", "-C", root, "rev-parse", "--show-toplevel"], capture_output=True,
+                             text=True, timeout=60, stdin=subprocess.DEVNULL)
+        if top.returncode != 0 or not top.stdout.strip():
+            return None
+        if os.path.normcase(os.path.realpath(top.stdout.strip())) != os.path.normcase(os.path.realpath(root)):
+            return None
+        r = subprocess.run(["git", "-C", root, "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+                           capture_output=True, timeout=60, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if r.returncode != 0:
+        return None
+    return sorted({f for f in r.stdout.decode("utf-8", "surrogateescape").split("\0") if f})
+
+
+def candidates(root):
+    files = published(root)
+    if files is not None:
+        for rel in files:
+            if not SKIP_DIRS.intersection(rel.split("/")):
+                yield os.path.join(root, *rel.split("/"))
+        return
+    for folder, dirs, names in os.walk(root):
+        dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS)
+        for name in sorted(names):
+            if name not in SKIP_DIRS:                # a worktree's .git is a file
+                yield os.path.join(folder, name)
+
+
 def scan(root):
     hits = []
-    for folder, dirs, files in os.walk(root):
-        dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS)
-        for name in sorted(files):
-            path = os.path.join(folder, name)
-            try:
-                with open(path, "rb") as fh:
-                    data = fh.read()
-            except OSError:
-                continue
-            text = read_text(data)
-            if text is None:
-                continue
-            for number, line in enumerate(text.split("\n"), 1):      # the same line numbers as grep and editors
-                if any(p.search(line) for p in PATTERNS):
-                    hits.append(f"{os.path.relpath(path, root)}:{number}: {line.strip()[:200]}")
+    for path in candidates(root):
+        try:
+            with open(path, "rb") as fh:
+                data = fh.read()
+        except OSError:
+            continue
+        text = read_text(data)
+        if text is None:
+            continue
+        for number, line in enumerate(text.split("\n"), 1):      # the same line numbers as grep and editors
+            if any(p.search(line) for p in PATTERNS):
+                hits.append(f"{os.path.relpath(path, root)}:{number}: {line.strip()[:200]}")
     return hits
 
 

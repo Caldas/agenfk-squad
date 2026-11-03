@@ -218,6 +218,13 @@ function PythonParts {
 
 $ShimMark = 'REM agenfk-squad: written by install.ps1'
 $ShimPath = Join-Path (Join-Path (Join-Path $UserHome '.local') 'bin') 'squad-turn.cmd'
+$ShimTarget = Join-Path (Split-Path $ShimPath) 'squad-turn.path'
+
+# cmd decodes the bytes of a batch file in whatever code page the console has when it runs, which an
+# installer cannot know: a path with an accent (a profile called "Jose" with an accent) written in any one
+# code page breaks under another. So the shim holds no path. %~dp0, its own folder, is expanded by cmd
+# itself, and Python reads the path of squad-turn.py from squad-turn.path next to it, in UTF-8.
+$ShimPython = "import runpy,sys;p=open(sys.argv[1],encoding='utf-8-sig').read().strip();sys.argv=[p]+sys.argv[2:];runpy.run_path(p,run_name='__main__')"
 
 function WriteShim {
   $parts = @(PythonParts)
@@ -227,16 +234,27 @@ function WriteShim {
   }
   $launcher = '"' + $parts[0] + '"'
   if ($parts.Count -gt 1) { $launcher += ' ' + ($parts[1..($parts.Count - 1)] -join ' ') }
-  $body = "@echo off`r`n$ShimMark; it is rewritten on every run`r`n$launcher `"$Squad\hooks\squad-turn.py`" %*`r`n"
-  # cmd reads a batch file in the OEM code page, not in UTF-8: a profile called "Jose" with an accent must survive
+  if ($launcher -match '[^\x20-\x7E]') {
+    Warn "WARNING SQUAD_PYTHON holds a character outside ASCII: squad-turn.cmd may not find it in every console code page."
+  }
+  $body = "@echo off`r`n$ShimMark; it is rewritten on every run`r`n$launcher -c `"$ShimPython`" `"%~dp0squad-turn.path`" %*`r`n"
   $oem = [System.Text.Encoding]::GetEncoding([System.Globalization.CultureInfo]::CurrentCulture.TextInfo.OEMCodePage)
   $bytes = $oem.GetBytes($body)
+  $target = (New-Object System.Text.UTF8Encoding($false)).GetBytes("$Squad\hooks\squad-turn.py`n")
   if (Test-Path -LiteralPath $ShimPath) {
-    $now = [System.IO.File]::ReadAllBytes($ShimPath)
-    if ([System.Convert]::ToBase64String($now) -eq [System.Convert]::ToBase64String($bytes)) { Say "same    $ShimPath"; return $true }
-    if (-not $oem.GetString($now).Contains($ShimMark)) { Warn "SKIPPED $ShimPath exists and is not the squad's - resolve it by hand"; return $false }
+    if (-not $oem.GetString([System.IO.File]::ReadAllBytes($ShimPath)).Contains($ShimMark)) {
+      Warn "SKIPPED $ShimPath exists and is not the squad's - resolve it by hand"; return $false
+    }
   }
+  if ((Test-Path -LiteralPath $ShimTarget) -and -not (Test-Path -LiteralPath $ShimPath)) {
+    Warn "SKIPPED $ShimTarget exists and no squad shim goes with it - resolve it by hand"; return $false
+  }
+  $same = (Test-Path -LiteralPath $ShimPath) -and (Test-Path -LiteralPath $ShimTarget) -and
+          ([System.Convert]::ToBase64String([System.IO.File]::ReadAllBytes($ShimPath)) -eq [System.Convert]::ToBase64String($bytes)) -and
+          ([System.Convert]::ToBase64String([System.IO.File]::ReadAllBytes($ShimTarget)) -eq [System.Convert]::ToBase64String($target))
+  if ($same) { Say "same    $ShimPath"; return $true }
   New-Item -ItemType Directory -Force -Path (Split-Path $ShimPath) | Out-Null
+  [System.IO.File]::WriteAllBytes($ShimTarget, $target)
   [System.IO.File]::WriteAllBytes($ShimPath, $bytes)
   Say "ok      $ShimPath -> $Squad\hooks\squad-turn.py"
   return $true
@@ -267,7 +285,10 @@ if ($Uninstall) {
   }
   SaveMarks
   if (Test-Path -LiteralPath $ShimPath) {
-    if ([System.IO.File]::ReadAllText($ShimPath).Contains($ShimMark)) { Remove-Item -LiteralPath $ShimPath -Force; Say "removed $ShimPath" }
+    if ([System.IO.File]::ReadAllText($ShimPath).Contains($ShimMark)) {
+      Remove-Item -LiteralPath $ShimPath -Force; Say "removed $ShimPath"
+      if (Test-Path -LiteralPath $ShimTarget) { Remove-Item -LiteralPath $ShimTarget -Force; Say "removed $ShimTarget" }
+    }
   }
   exit 0
 }
