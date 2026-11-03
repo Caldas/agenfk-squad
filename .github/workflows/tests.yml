@@ -22,26 +22,41 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Compile hooks and scripts
         run: python -m py_compile hooks/*.py skills/session-context/scripts/session_context.py
-      - name: Vendor lock and install guard
-        run: python tests/test_vendor.py
-      - name: Agent standing-order sections
-        run: python tests/test_agents.py
-      - name: Offline evidence tools and skill contracts
-        run: |
-          for t in tests/test_pr_evidence.py tests/test_ci_plan_evidence.py tests/test_parallel_plan.py tests/test_bundle_contracts.py; do
-            python -B "$t" || exit 1
-          done
       - name: Check install.sh syntax
         run: bash -n install.sh
-      - name: Watcher test suite
-        run: python tests/test_watch.py
-      - name: Board heartbeat tests
-        run: python tests/test_heartbeat.py
-      # Node is the same on every Python leg: run the helper tests once.
+      # Some Python tests drive real Node code (the omp extension), so Node is
+      # pinned on every leg before them rather than left to the runner image.
       - uses: actions/setup-node@v4
-        if: matrix.python == '3.12'
         with:
           node-version: "22"
+      # Every tests/test_*.py, found by glob: a new test file runs here without
+      # editing this workflow. All files run; the step fails if any one fails.
+      # No bytecode, not even from the scripts a test spawns: a .pyc carries
+      # the runner's /home path and would trip the private-paths check below.
+      - name: Python test files (every tests/test_*.py)
+        shell: bash
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          set -uo pipefail
+          shopt -s nullglob
+          files=(tests/test_*.py)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "::error::no tests/test_*.py found"
+            exit 1
+          fi
+          failed=()
+          for t in "${files[@]}"; do
+            echo "::group::$t"
+            python -B "$t" || failed+=("$t")
+            echo "::endgroup::"
+          done
+          echo "ran ${#files[@]} test files, ${#failed[@]} failed"
+          for t in "${failed[@]}"; do
+            echo "::error file=$t::$t failed"
+          done
+          [ "${#failed[@]}" -eq 0 ]
+      # Node is the same on every Python leg: run the helper tests once.
       - name: ci-cost changed-ranges tests (floor 23)
         if: matrix.python == '3.12'
         run: |
