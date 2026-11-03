@@ -178,7 +178,7 @@ def test_an_over_ceiling_dispatch_is_denied_and_the_brief_is_kept():
         watch = os.path.join(home, ".claude", "squad", "watch")
         os.makedirs(watch)
         with open(os.path.join(watch, f"{SID}.main.json"), "w") as fh:
-            json.dump({"ctx": 700_000}, fh)          # above MAIN_CEIL (600k)
+            json.dump({"ctx": 850_000}, fh)          # above MAIN_CEIL (800k)
         r = run(home, {"event": "before_subagent_spawn", "session_id": SID,
                        "transcript_path": path, "cwd": "/work/proj", "agent": "verifier",
                        "prompt": "Review card e3351732 on the branch feat/x."})

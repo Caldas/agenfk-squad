@@ -64,7 +64,7 @@ Everything in weighted tokens: input 1 · cache-write 1.25 · cache-read 0.1 · 
 |---|---|---|
 | new work | input + 1.25·write + 5·output | what the session produced |
 | reread | 0.1·cache-read | what it paid to reread itself |
-| **ratio** (reread/new) | reread ÷ new work | informational only; what decides is **reread** ≥ 60% **and** ctx ≥ floor (50% of the window with burn ≥ 50% of the budget, rising to 80% with zero burn), or ctx ≥ 80% on its own (the math of `session_context.py`, not an estimate) |
+| **ratio** (reread/new) | reread ÷ new work | informational only; what decides is **reread** ≥ 60% **and** ctx ≥ floor (70% of the window with burn ≥ 50% of the budget, rising to 90% with zero burn), or ctx ≥ 90% on its own (the math of `session_context.py`, not an estimate) |
 | toll per turn | 0.1·ctx | fixed cost of every extra turn |
 | restart | 1.25·40k + 5·2k = 60k | writing the handoff and rebuilding the cache |
 | **payback** | restart ÷ (0.1·(ctx − 40k)) | turns until the new session pays for itself |
