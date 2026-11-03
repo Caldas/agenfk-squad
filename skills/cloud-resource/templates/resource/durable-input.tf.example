@@ -1,0 +1,80 @@
+# The service-stack side of durable data (triage, destination 2).
+#
+# The data lives in its own root (durable-data.tf.example). The service stack
+# receives it as an OPTIONAL input: filled in, it uses the existing one; empty,
+# it creates its own, useful in a disposable environment or an isolated
+# install. The bucket created here carries the same protections as the durable
+# one, minus prevent_destroy: it is born and dies with this stack.
+
+# --- variables.tf -------------------------------------------------------------
+
+variable "existing_bucket_{{resource}}" {
+  description = "Existing bucket to use. Empty makes the stack create its own."
+  type        = string
+  default     = ""
+}
+
+# --- main.tf ------------------------------------------------------------------
+
+locals {
+  # Where the rest of the stack points. The external path goes through the
+  # data source, not the raw variable: a wrong name or a missing bucket fails
+  # at plan, not at first use.
+  bucket_{{resource}} = var.existing_bucket_{{resource}} != "" ? data.aws_s3_bucket.{{resource}}[0].id : aws_s3_bucket.{{resource}}[0].id
+}
+
+# Resolves the durable root's data by the name coming from the tfvars. Never
+# terraform_remote_state: it welds this stack to the other one's backend.
+data "aws_s3_bucket" "{{resource}}" {
+  count  = var.existing_bucket_{{resource}} != "" ? 1 : 0
+  bucket = var.existing_bucket_{{resource}}
+}
+
+# Created only when no external one is given. Encryption, versioning and the
+# public access block follow the same condition: everything the stack creates
+# is born protected.
+resource "aws_s3_bucket" "{{resource}}" {
+  count  = var.existing_bucket_{{resource}} == "" ? 1 : 0
+  bucket = "${local.name_prefix}-{{resource}}"
+}
+
+resource "aws_s3_bucket_versioning" "{{resource}}" {
+  count  = var.existing_bucket_{{resource}} == "" ? 1 : 0
+  bucket = aws_s3_bucket.{{resource}}[0].id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "{{resource}}" {
+  count                   = var.existing_bucket_{{resource}} == "" ? 1 : 0
+  bucket                  = aws_s3_bucket.{{resource}}[0].id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+data "aws_kms_key" "{{resource}}" {
+  count  = var.existing_bucket_{{resource}} == "" && var.kms_key_alias != "" ? 1 : 0
+  key_id = var.kms_key_alias
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "{{resource}}" {
+  count  = var.existing_bucket_{{resource}} == "" ? 1 : 0
+  bucket = aws_s3_bucket.{{resource}}[0].id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "aws:kms"
+      # Empty alias: the AWS-managed aws/s3 key, declared under Deviations.
+      kms_master_key_id = var.kms_key_alias == "" ? null : data.aws_kms_key.{{resource}}[0].arn
+    }
+    bucket_key_enabled = true
+  }
+}
+
+# --- <env>.tfvars -------------------------------------------------------------
+# existing_bucket_{{resource}} = "{{project}}-prod-{{resource}}"   # data from the durable root
+# existing_bucket_{{resource}} = ""                               # disposable environment: create its own

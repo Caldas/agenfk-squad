@@ -1,0 +1,50 @@
+# A resource that lives and dies with the stack (triage, destination 3).
+# Example: an SQS queue with a dead-letter queue. No lifecycle guard.
+#
+# Invariants the example carries:
+#   - the name comes from local.name_prefix (the stack's locals.tf), never
+#     from fixed text;
+#   - account, VPC and ARN arrive through a variable or a data source, never
+#     as literals;
+#   - tags come from the provider's default_tags: nothing to repeat here, only
+#     `Name` when the resource type shows Name in the console;
+#   - encrypted with the stack's named key (var.kms_key_alias). An empty alias
+#     falls back to service-managed encryption, and the PR says so under
+#     Deviations.
+
+data "aws_kms_key" "{{resource}}" {
+  count  = var.kms_key_alias == "" ? 0 : 1
+  key_id = var.kms_key_alias
+}
+
+resource "aws_sqs_queue" "{{resource}}_dlq" {
+  name                      = "${local.name_prefix}-{{resource}}-dlq"
+  message_retention_seconds = 1209600 # 14 days: enough to diagnose, and it still expires
+
+  kms_master_key_id       = var.kms_key_alias == "" ? null : data.aws_kms_key.{{resource}}[0].arn
+  sqs_managed_sse_enabled = var.kms_key_alias == "" ? true : null
+}
+
+resource "aws_sqs_queue" "{{resource}}" {
+  name                       = "${local.name_prefix}-{{resource}}"
+  visibility_timeout_seconds = var.visibility_timeout_{{resource}}
+
+  kms_master_key_id       = var.kms_key_alias == "" ? null : data.aws_kms_key.{{resource}}[0].arn
+  sqs_managed_sse_enabled = var.kms_key_alias == "" ? true : null
+
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.{{resource}}_dlq.arn
+    maxReceiveCount     = 5
+  })
+}
+
+variable "visibility_timeout_{{resource}}" {
+  description = "Visibility timeout in seconds; it must exceed the consumer's worst processing time."
+  type        = number
+  default     = 300
+}
+
+output "queue_url_{{resource}}" {
+  description = "Queue URL for the consuming service."
+  value       = aws_sqs_queue.{{resource}}.url
+}

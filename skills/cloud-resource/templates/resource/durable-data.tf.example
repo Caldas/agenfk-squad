@@ -1,0 +1,73 @@
+# Data that must survive the destruction of the stack (triage, destination 2).
+# It goes in a root with its own state inside the project (e.g. infra/data/),
+# or in the service stack if the project does not want another root. Either
+# way the invariants are the lifecycle guard and the service's native
+# protections.
+# Example: an uploads bucket. Adapt per resource type.
+
+resource "aws_s3_bucket" "{{resource}}" {
+  # Bucket names are unique across ALL AWS accounts: a purely descriptive name
+  # may already belong to a stranger. If apply fails on the name, add the
+  # owner's or the organisation's prefix, never a random suffix that changes
+  # on every plan.
+  bucket = "${local.name_prefix}-{{resource}}"
+
+  lifecycle {
+    # Durable data: destroying the stack never destroys the data.
+    prevent_destroy = true
+  }
+}
+
+resource "aws_s3_bucket_versioning" "{{resource}}" {
+  bucket = aws_s3_bucket.{{resource}}.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "{{resource}}" {
+  bucket                  = aws_s3_bucket.{{resource}}.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+# Customer-managed key first. The alias is an input with no default, so the
+# choice sits in <env>.tfvars, where the reviewer sees it, and no key ARN is
+# literal. Read by alias only a key that already exists; a key created in this
+# stack is referenced as aws_kms_key.<name>.arn.
+data "aws_kms_key" "{{resource}}" {
+  count  = var.kms_key_alias == "" ? 0 : 1
+  key_id = var.kms_key_alias
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "{{resource}}" {
+  bucket = aws_s3_bucket.{{resource}}.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "aws:kms"
+      # An empty alias falls back to the AWS-managed aws/s3 key. That is a real
+      # scanner finding (customer key expected) which this expression hides:
+      # when the tfvars passes "", answer it right here, with an inline
+      # suppression and the reason, and say so under Deviations in the PR.
+      # Never a global suppression.
+      kms_master_key_id = var.kms_key_alias == "" ? null : data.aws_kms_key.{{resource}}[0].arn
+    }
+    bucket_key_enabled = true
+  }
+}
+
+# The service stack consumes this data by name (data source), never through
+# terraform_remote_state: see durable-input.tf.example.
+output "bucket_name_{{resource}}" {
+  description = "Bucket name, an optional input of the service stack."
+  value       = aws_s3_bucket.{{resource}}.id
+}
+
+output "bucket_arn_{{resource}}" {
+  description = "Bucket ARN, for IAM policies in the service stack."
+  value       = aws_s3_bucket.{{resource}}.arn
+}
